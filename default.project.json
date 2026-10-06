@@ -21,6 +21,16 @@
       "$properties": {
         "GameSettingsAvatar": "R6"
       }
+    },
+    "Lighting": {
+      "$properties": {
+        "Technology": "Future",
+        "GlobalShadows": true,
+        "ClockTime": 0,
+        "Brightness": 0,
+        "EnvironmentDiffuseScale": 0.35,
+        "EnvironmentSpecularScale": 0.6
+      }
     }
   }
 }
