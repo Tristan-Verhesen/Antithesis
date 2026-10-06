@@ -18,6 +18,26 @@ local function today(): number
 	return os.time() // 86400
 end
 
+local questById = {}
+for _, q in Config.Quests do
+	questById[q.id] = q
+end
+
+-- Roll 3 fresh daily quests when the day changes.
+local function ensureQuests(p)
+	local d = today()
+	if p.questDay == d and #p.quests > 0 then
+		return
+	end
+	local pool = table.clone(Config.Quests)
+	p.quests = {}
+	for _ = 1, math.min(Config.DailyQuestCount, #pool) do
+		local q = table.remove(pool, math.random(#pool))
+		table.insert(p.quests, { id = q.id, progress = 0, claimed = false })
+	end
+	p.questDay = d
+end
+
 local function default()
 	local unlocked = {}
 	for id, w in Config.Weapons do
@@ -39,6 +59,8 @@ local function default()
 		lastDay = 0,
 		lastWinDay = 0,
 		fov = 70,
+		questDay = 0,
+		quests = {},
 	}
 end
 
@@ -51,6 +73,7 @@ function Data.push(player: Player)
 	if not p then
 		return
 	end
+	ensureQuests(p)
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats.Coins.Value = p.coins
@@ -111,6 +134,33 @@ end
 function Data.release(player: Player)
 	Data.save(player)
 	profiles[player] = nil
+end
+
+-- Count progress toward today's quests (stat names come from Config.Quests).
+function Data.questProgress(player: Player, stat: string, amount: number)
+	local p = profiles[player]
+	if not p then
+		return
+	end
+	ensureQuests(p)
+	for _, entry in p.quests do
+		local q = questById[entry.id]
+		if q and q.stat == stat and not entry.claimed then
+			entry.progress = math.min(q.goal, entry.progress + amount)
+		end
+	end
+end
+
+function Data.claimQuest(player: Player, index: any)
+	local p = profiles[player]
+	local entry = p and type(index) == "number" and p.quests[index]
+	local q = entry and questById[entry.id]
+	if not q or entry.claimed or entry.progress < q.goal then
+		return
+	end
+	entry.claimed = true
+	p.coins += q.reward
+	Data.push(player)
 end
 
 function Data.addWeeklyWin(player: Player)

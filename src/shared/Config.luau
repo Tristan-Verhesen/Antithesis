@@ -45,22 +45,47 @@ Config.Match = {
 	RewindCap = 0.2,
 }
 
--- Lobby: pad stations along the hall walls (left wall front-to-back, then right wall).
+-- Lobby: a round hub with four arms in a + shape.
+--   north (+Z) = pad stations, east (+X) = cosmetics shop, west (-X) = quests,
+--   south (-Z) = teleport pad to the firing range, built 200 studs further south.
 Config.Lobby = {
-	Stations = { "Duel", "Duel", "Doubles", "Duel", "Duel", "Doubles" },
+	HubRadius = 36,
+	Stations = { "Duel", "Duel", "Doubles", "Duel", "Duel", "Doubles" }, -- left wall front-to-back, then right wall
 	PadCountdown = 5,
 	PadRadius = 4.5,
+	TeleportCooldown = 1.5,
 	MinZoom = 8, -- third-person camera in the lobby
 	MaxZoom = 20,
-	RangeCenter = Vector3.new(0, 15, -146), -- firing range room: first person + weapons inside
-	RangeSize = Vector3.new(60, 40, 92),
+	-- Walk-in zones (center, size). Inside Range: first person + weapons.
+	Shop = { center = Vector3.new(66, 10, 0), size = Vector3.new(60, 30, 40) },
+	Quests = { center = Vector3.new(-66, 10, 0), size = Vector3.new(60, 30, 40) },
+	Range = { center = Vector3.new(0, 15, -330), size = Vector3.new(60, 40, 92) },
 }
 
-function Config.inRange(pos: Vector3): boolean
-	local d = pos - Config.Lobby.RangeCenter
-	local h = Config.Lobby.RangeSize / 2
+function Config.inZone(zone, pos: Vector3): boolean
+	local d = pos - zone.center
+	local h = zone.size / 2
 	return math.abs(d.X) <= h.X and math.abs(d.Y) <= h.Y and math.abs(d.Z) <= h.Z
 end
+
+function Config.inRange(pos: Vector3): boolean
+	return Config.inZone(Config.Lobby.Range, pos)
+end
+
+-- Daily quests: 3 are picked at random each day. stat names are counted by the server.
+Config.Quests = {
+	{ id = "win1", text = "Win a match", stat = "wins", goal = 1, reward = 50 },
+	{ id = "win3", text = "Win 3 matches", stat = "wins", goal = 3, reward = 150 },
+	{ id = "play3", text = "Play 3 matches", stat = "matches", goal = 3, reward = 75 },
+	{ id = "kills10", text = "Get 10 eliminations", stat = "kills", goal = 10, reward = 75 },
+	{ id = "kills25", text = "Get 25 eliminations", stat = "kills", goal = 25, reward = 150 },
+	{ id = "heads5", text = "Get 5 headshot eliminations", stat = "headshots", goal = 5, reward = 100 },
+	{ id = "dmg2000", text = "Deal 2,000 damage", stat = "damage", goal = 2000, reward = 100 },
+	{ id = "rounds10", text = "Win 10 rounds", stat = "rounds", goal = 10, reward = 100 },
+	{ id = "knife2", text = "Get 2 knife eliminations", stat = "knifeKills", goal = 2, reward = 100 },
+	{ id = "flawless1", text = "Win a round at full health", stat = "flawless", goal = 1, reward = 100 },
+}
+Config.DailyQuestCount = 3
 
 Config.Rewards = {
 	Win = 40,

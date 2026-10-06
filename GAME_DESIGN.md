@@ -31,7 +31,8 @@ Units: studs and seconds. All numbers are launch values and live in one tuning m
 *Walk onto a pad, wait for someone to step on the other one, and five seconds later you're in a first-person duel. One life per round, first to 5.*
 
 ### 1.2 Pad Matchmaking (Rivals-style)
-1. The lobby hall has **6 pad stations**: 4 for 1v1 and 2 for 2v2. Each station has a cyan pad and an orange pad, with a wall board above each showing `count/size`.
+0. **Lobby layout:** a round hub with four arms in a **+** shape. North is PLAY (the pad stations), east is the COSMETICS SHOP (walk in to browse), west is DAILY QUESTS (walk in to see and claim), and south has a teleport pad to a separate FIRING RANGE room 200 studs away.
+1. The PLAY arm has **6 pad stations**: 4 for 1v1 and 2 for 2v2. Each station has a cyan pad and an orange pad, with a wall board above each showing `count/size`.
 2. Stand on a pad to join that side. When both pads are full, a **5-second countdown** runs on the boards and on your screen. Stepping off cancels it.
 3. At zero, everyone on the station goes into a **new arena built for that match**, so stations never wait for a free arena.
 4. After the match: results, coins, a 10-second **rematch** vote, then back to the lobby.
@@ -236,12 +237,13 @@ Arenas mix **one long lane, one mid lane and one close-quarters route**, so ever
 | ~4 matches | First unlock (Hornet, 150 Coins). Unlocks are the first progression hook |
 
 ### 4.2 Session Loop (3 minutes → 45)
-1. **Auto-Requeue:** 5s countdown on the results screen, on by default.
-2. **Rematch / "Run it back":** both sides accept within 8s → same arena, no queue.
+1. **Pads are steps away:** results close straight into the lobby hub, and the PLAY arm is right in front of the spawn.
+2. **Rematch / "Run it back":** every player votes within 10s → straight into a new match, no pads.
 3. **Next-unlock bar:** the results screen always shows "**85 / 150 Coins → Hornet**".
 4. **Win streak:** +5 Coins per consecutive win, up to +25.
 5. **First Win of the Day:** +100 Coins.
-6. **Call-Outs:** click a player in the lobby → challenge. Rivalries form between people sharing a server.
+6. **Daily quests:** 3 random quests a day (e.g. "Win 3 matches", "Get 25 eliminations", "Deal 2,000 damage"), each worth 50–150 coins. Claimed in the lobby's Quests arm; the QUESTS button shows how many are ready.
+7. **Call-Outs:** hold E near a player in the lobby to challenge them. Rivalries form between people sharing a server.
 
 ### 4.3 Mastery
 

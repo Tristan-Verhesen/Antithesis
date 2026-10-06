@@ -4,14 +4,16 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Net = require(ReplicatedStorage.Shared.Net)
+local Combat = require(script.Parent.Combat)
 local Match = require(script.Parent.Match)
 local World = require(script.Parent.World)
 
 local Lobby = {}
 local L = Config.Lobby
 local lastStatus: { [Player]: string } = {}
+local teleportReady: { [Player]: number } = {}
 
-local function onPad(player: Player, pad): boolean
+local function standingOn(player: Player, center: Vector3): boolean
 	if Match.busy(player) then
 		return false
 	end
@@ -21,8 +23,29 @@ local function onPad(player: Player, pad): boolean
 	if not (hum and root and hum.Health > 0) then
 		return false
 	end
-	local offset = root.Position - pad.center
+	local offset = root.Position - center
 	return offset.Y > -1 and offset.Y < 8 and Vector2.new(offset.X, offset.Z).Magnitude <= L.PadRadius
+end
+
+local function onPad(player: Player, pad): boolean
+	return standingOn(player, pad.center)
+end
+
+-- Range teleport pads: lobby arm <-> separate firing range room.
+local function teleports()
+	local now = os.clock()
+	for _, p in Players:GetPlayers() do
+		if now >= (teleportReady[p] or 0) then
+			for _, tp in World.teleports do
+				if standingOn(p, tp.center) then
+					p.Character:PivotTo(tp.target)
+					Combat.clear(p) -- the anti-speed check must not snap the player back
+					teleportReady[p] = now + L.TeleportCooldown
+					break
+				end
+			end
+		end
+	end
 end
 
 local function setText(label: TextLabel, text: string)
@@ -112,11 +135,13 @@ local function tick()
 			tell(p, nil)
 		end
 	end
+	teleports()
 end
 
 function Lobby.start()
 	Players.PlayerRemoving:Connect(function(p)
 		lastStatus[p] = nil
+		teleportReady[p] = nil
 	end)
 	task.spawn(function()
 		while true do

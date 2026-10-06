@@ -189,9 +189,11 @@ local function roundEnd(m, winner: number)
 		for _, p in m.teams[winner] do
 			if byPlayer[p] == m then
 				m.stats[p].roundsWon += 1
+				Data.questProgress(p, "rounds", 1)
 				local hum = humOf(p)
 				if hum and hum.Health >= hum.MaxHealth then
 					banner(m, p, "FLAWLESS")
+					Data.questProgress(p, "flawless", 1)
 				end
 				if hum and m.clutch[p] then
 					banner(m, p, "CLUTCH 1v2")
@@ -218,6 +220,10 @@ local function finish(m)
 			local st = m.stats[p]
 			local team = p:GetAttribute("Team")
 			local won = team == winner
+			Data.questProgress(p, "matches", 1)
+			if won then
+				Data.questProgress(p, "wins", 1)
+			end
 			local lines = Data.reward(p, won, st.roundsWon > 0 or st.damage >= Config.Rewards.MinDamage, st.banners)
 			Data.push(p)
 			p:SetAttribute("MatchId", 0)
@@ -371,10 +377,11 @@ function Match.start()
 		end
 		return list
 	end
-	Combat.onDamage = function(a, _v, amount)
+	Combat.onDamage = function(a, v, amount)
 		local m = byPlayer[a]
-		if m and m.stats[a] then
+		if m and m.stats[a] and a ~= v then
 			m.stats[a].damage += amount
+			Data.questProgress(a, "damage", amount)
 		end
 	end
 	Combat.onKill = function(a, v, weaponId, info)
@@ -395,6 +402,13 @@ function Match.start()
 		if a and a ~= v and m.stats[a] then
 			local st = m.stats[a]
 			st.roundKills += 1
+			Data.questProgress(a, "kills", 1)
+			if info and info.head then
+				Data.questProgress(a, "headshots", 1)
+			end
+			if weaponId == "Edge" then
+				Data.questProgress(a, "knifeKills", 1)
+			end
 			if weaponId == "Meridian" and not info.scoped then
 				banner(m, a, "NO-SCOPE")
 			end

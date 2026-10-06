@@ -57,22 +57,47 @@ Config.Match = {
 	RewindCap = 0.2,
 }
 
--- Lobby: pad stations along the hall walls (left wall front-to-back, then right wall).
+-- Lobby: a round hub with four arms in a + shape.
+--   north (+Z) = pad stations, east (+X) = cosmetics shop, west (-X) = quests,
+--   south (-Z) = teleport pad to the firing range, built 200 studs further south.
 Config.Lobby = {
-	Stations = { "Duel", "Duel", "Doubles", "Duel", "Duel", "Doubles" },
+	HubRadius = 36,
+	Stations = { "Duel", "Duel", "Doubles", "Duel", "Duel", "Doubles" }, -- left wall front-to-back, then right wall
 	PadCountdown = 5,
 	PadRadius = 4.5,
+	TeleportCooldown = 1.5,
 	MinZoom = 8, -- third-person camera in the lobby
 	MaxZoom = 20,
-	RangeCenter = Vector3.new(0, 15, -146), -- firing range room: first person + weapons inside
-	RangeSize = Vector3.new(60, 40, 92),
+	-- Walk-in zones (center, size). Inside Range: first person + weapons.
+	Shop = { center = Vector3.new(66, 10, 0), size = Vector3.new(60, 30, 40) },
+	Quests = { center = Vector3.new(-66, 10, 0), size = Vector3.new(60, 30, 40) },
+	Range = { center = Vector3.new(0, 15, -330), size = Vector3.new(60, 40, 92) },
 }
 
-function Config.inRange(pos: Vector3): boolean
-	local d = pos - Config.Lobby.RangeCenter
-	local h = Config.Lobby.RangeSize / 2
+function Config.inZone(zone, pos: Vector3): boolean
+	local d = pos - zone.center
+	local h = zone.size / 2
 	return math.abs(d.X) <= h.X and math.abs(d.Y) <= h.Y and math.abs(d.Z) <= h.Z
 end
+
+function Config.inRange(pos: Vector3): boolean
+	return Config.inZone(Config.Lobby.Range, pos)
+end
+
+-- Daily quests: 3 are picked at random each day. stat names are counted by the server.
+Config.Quests = {
+	{ id = "win1", text = "Win a match", stat = "wins", goal = 1, reward = 50 },
+	{ id = "win3", text = "Win 3 matches", stat = "wins", goal = 3, reward = 150 },
+	{ id = "play3", text = "Play 3 matches", stat = "matches", goal = 3, reward = 75 },
+	{ id = "kills10", text = "Get 10 eliminations", stat = "kills", goal = 10, reward = 75 },
+	{ id = "kills25", text = "Get 25 eliminations", stat = "kills", goal = 25, reward = 150 },
+	{ id = "heads5", text = "Get 5 headshot eliminations", stat = "headshots", goal = 5, reward = 100 },
+	{ id = "dmg2000", text = "Deal 2,000 damage", stat = "damage", goal = 2000, reward = 100 },
+	{ id = "rounds10", text = "Win 10 rounds", stat = "rounds", goal = 10, reward = 100 },
+	{ id = "knife2", text = "Get 2 knife eliminations", stat = "knifeKills", goal = 2, reward = 100 },
+	{ id = "flawless1", text = "Win a round at full health", stat = "flawless", goal = 1, reward = 100 },
+}
+Config.DailyQuestCount = 3
 
 Config.Rewards = {
 	Win = 40,
@@ -312,6 +337,7 @@ local handlers = {
 	ChallengeReply = Match.challengeReply,
 	Rematch = Match.rematch,
 	Unlock = Data.unlock,
+	ClaimQuest = Data.claimQuest,
 	Palette = Data.setPalette,
 	Fov = Data.setFov,
 }
@@ -859,6 +885,26 @@ local function today(): number
 	return os.time() // 86400
 end
 
+local questById = {}
+for _, q in Config.Quests do
+	questById[q.id] = q
+end
+
+-- Roll 3 fresh daily quests when the day changes.
+local function ensureQuests(p)
+	local d = today()
+	if p.questDay == d and #p.quests > 0 then
+		return
+	end
+	local pool = table.clone(Config.Quests)
+	p.quests = {}
+	for _ = 1, math.min(Config.DailyQuestCount, #pool) do
+		local q = table.remove(pool, math.random(#pool))
+		table.insert(p.quests, { id = q.id, progress = 0, claimed = false })
+	end
+	p.questDay = d
+end
+
 local function default()
 	local unlocked = {}
 	for id, w in Config.Weapons do
@@ -880,6 +926,8 @@ local function default()
 		lastDay = 0,
 		lastWinDay = 0,
 		fov = 70,
+		questDay = 0,
+		quests = {},
 	}
 end
 
@@ -892,6 +940,7 @@ function Data.push(player: Player)
 	if not p then
 		return
 	end
+	ensureQuests(p)
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats.Coins.Value = p.coins
@@ -952,6 +1001,33 @@ end
 function Data.release(player: Player)
 	Data.save(player)
 	profiles[player] = nil
+end
+
+-- Count progress toward today's quests (stat names come from Config.Quests).
+function Data.questProgress(player: Player, stat: string, amount: number)
+	local p = profiles[player]
+	if not p then
+		return
+	end
+	ensureQuests(p)
+	for _, entry in p.quests do
+		local q = questById[entry.id]
+		if q and q.stat == stat and not entry.claimed then
+			entry.progress = math.min(q.goal, entry.progress + amount)
+		end
+	end
+end
+
+function Data.claimQuest(player: Player, index: any)
+	local p = profiles[player]
+	local entry = p and type(index) == "number" and p.quests[index]
+	local q = entry and questById[entry.id]
+	if not q or entry.claimed or entry.progress < q.goal then
+		return
+	end
+	entry.claimed = true
+	p.coins += q.reward
+	Data.push(player)
 end
 
 function Data.addWeeklyWin(player: Player)
@@ -1098,14 +1174,16 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Net = require(ReplicatedStorage.Shared.Net)
+local Combat = require(script.Parent.Combat)
 local Match = require(script.Parent.Match)
 local World = require(script.Parent.World)
 
 local Lobby = {}
 local L = Config.Lobby
 local lastStatus: { [Player]: string } = {}
+local teleportReady: { [Player]: number } = {}
 
-local function onPad(player: Player, pad): boolean
+local function standingOn(player: Player, center: Vector3): boolean
 	if Match.busy(player) then
 		return false
 	end
@@ -1115,8 +1193,29 @@ local function onPad(player: Player, pad): boolean
 	if not (hum and root and hum.Health > 0) then
 		return false
 	end
-	local offset = root.Position - pad.center
+	local offset = root.Position - center
 	return offset.Y > -1 and offset.Y < 8 and Vector2.new(offset.X, offset.Z).Magnitude <= L.PadRadius
+end
+
+local function onPad(player: Player, pad): boolean
+	return standingOn(player, pad.center)
+end
+
+-- Range teleport pads: lobby arm <-> separate firing range room.
+local function teleports()
+	local now = os.clock()
+	for _, p in Players:GetPlayers() do
+		if now >= (teleportReady[p] or 0) then
+			for _, tp in World.teleports do
+				if standingOn(p, tp.center) then
+					p.Character:PivotTo(tp.target)
+					Combat.clear(p) -- the anti-speed check must not snap the player back
+					teleportReady[p] = now + L.TeleportCooldown
+					break
+				end
+			end
+		end
+	end
 end
 
 local function setText(label: TextLabel, text: string)
@@ -1206,11 +1305,13 @@ local function tick()
 			tell(p, nil)
 		end
 	end
+	teleports()
 end
 
 function Lobby.start()
 	Players.PlayerRemoving:Connect(function(p)
 		lastStatus[p] = nil
+		teleportReady[p] = nil
 	end)
 	task.spawn(function()
 		while true do
@@ -1418,9 +1519,11 @@ local function roundEnd(m, winner: number)
 		for _, p in m.teams[winner] do
 			if byPlayer[p] == m then
 				m.stats[p].roundsWon += 1
+				Data.questProgress(p, "rounds", 1)
 				local hum = humOf(p)
 				if hum and hum.Health >= hum.MaxHealth then
 					banner(m, p, "FLAWLESS")
+					Data.questProgress(p, "flawless", 1)
 				end
 				if hum and m.clutch[p] then
 					banner(m, p, "CLUTCH 1v2")
@@ -1447,6 +1550,10 @@ local function finish(m)
 			local st = m.stats[p]
 			local team = p:GetAttribute("Team")
 			local won = team == winner
+			Data.questProgress(p, "matches", 1)
+			if won then
+				Data.questProgress(p, "wins", 1)
+			end
 			local lines = Data.reward(p, won, st.roundsWon > 0 or st.damage >= Config.Rewards.MinDamage, st.banners)
 			Data.push(p)
 			p:SetAttribute("MatchId", 0)
@@ -1600,10 +1707,11 @@ function Match.start()
 		end
 		return list
 	end
-	Combat.onDamage = function(a, _v, amount)
+	Combat.onDamage = function(a, v, amount)
 		local m = byPlayer[a]
-		if m and m.stats[a] then
+		if m and m.stats[a] and a ~= v then
 			m.stats[a].damage += amount
+			Data.questProgress(a, "damage", amount)
 		end
 	end
 	Combat.onKill = function(a, v, weaponId, info)
@@ -1624,6 +1732,13 @@ function Match.start()
 		if a and a ~= v and m.stats[a] then
 			local st = m.stats[a]
 			st.roundKills += 1
+			Data.questProgress(a, "kills", 1)
+			if info and info.head then
+				Data.questProgress(a, "headshots", 1)
+			end
+			if weaponId == "Edge" then
+				Data.questProgress(a, "knifeKills", 1)
+			end
 			if weaponId == "Meridian" and not info.scoped then
 				banner(m, a, "NO-SCOPE")
 			end
@@ -1641,11 +1756,13 @@ return Match
       <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">World</string>
-          <string name="Source"><![CDATA[-- Builds the lobby hall (pad stations + firing range room) and creates/destroys an arena per match.
+          <string name="Source"><![CDATA[-- Builds the + shaped lobby (hub + pads, shop, quests and range-teleport arms), the separate firing range,
+-- and creates/destroys an arena per match.
 -- Everything is generated from code, so the place needs no manual building.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
+local WeaponModels = require(ReplicatedStorage.Shared.WeaponModels)
 
 local C = Config.Colors
 local GRAY = Color3.fromRGB(120, 122, 128)
@@ -1702,6 +1819,7 @@ local LAYOUTS = {
 
 local World = {}
 World.stations = {}
+World.teleports = {} -- { center = Vector3, target = CFrame }
 
 local map: Folder
 local board: TextLabel
@@ -1787,13 +1905,30 @@ end
 
 ---------------------------------------------------------------- lobby
 
+local L = Config.Lobby
+local R = L.HubRadius
+local ARMS = {
+	{ key = "Pads", dir = Vector3.new(0, 0, 1), width = 60, length = 170, trim = C.Purple, title = "PLAY" },
+	{ key = "Shop", dir = Vector3.new(1, 0, 0), width = 40, length = 60, trim = C.Gold, title = "SHOP" },
+	{ key = "Quests", dir = Vector3.new(-1, 0, 0), width = 40, length = 60, trim = C.Good, title = "QUESTS" },
+	{ key = "Range", dir = Vector3.new(0, 0, -1), width = 30, length = 40, trim = C.Ally, title = "FIRING RANGE" },
+}
+local WALL_H = 24
+
+local function glowPad(parent: Instance, center: Vector3, color: Color3): Part
+	local ring = disc(parent, center + Vector3.new(0, 0.11, 0), 10, 0.12, color, Enum.Material.Neon)
+	disc(parent, center + Vector3.new(0, 0.2, 0), 8.6, 0.3, C.Metal)
+	disc(parent, center + Vector3.new(0, 0.21, 0), 3, 0.32, color, Enum.Material.Neon)
+	return ring
+end
+
 local function buildStation(lobby: Model, index: number, mode: string)
-	local half = math.ceil(#Config.Lobby.Stations / 2)
+	local half = math.ceil(#L.Stations / 2)
 	local side = index <= half and -1 or 1 -- left wall first, then right wall
 	local row = (index - 1) % half
-	local zc = 50 - row * 50
-	local x = side * 26
-	local wallX = side * 39.6
+	local zc = R + 30 + row * 50
+	local x = side * 18
+	local wallX = side * 29.6
 	local inward = Vector3.new(-side, 0, 0)
 	local cfg = Config.Modes[mode]
 	local station = { mode = mode, size = cfg.teamSize, pads = {}, startsAt = nil }
@@ -1803,77 +1938,181 @@ local function buildStation(lobby: Model, index: number, mode: string)
 	for team, dz in { -7, 7 } do
 		local color = team == 1 and C.Ally or C.Enemy
 		local center = Vector3.new(x, 0, zc + dz)
-		local ring = disc(lobby, center + Vector3.new(0, 0.11, 0), 10, 0.12, color, Enum.Material.Neon)
-		disc(lobby, center + Vector3.new(0, 0.2, 0), 8.6, 0.3, C.Metal)
-		disc(lobby, center + Vector3.new(0, 0.21, 0), 3, 0.32, color, Enum.Material.Neon)
+		local ring = glowPad(lobby, center, color)
 		local label = sign(lobby, Vector3.new(wallX, 9, zc + dz), inward, Vector2.new(9, 5.5), "0/" .. cfg.teamSize, color)
-		table.insert(station.pads, { center = center + Vector3.new(0, 0.35, 0), board = label, ring = ring, color = color, occupants = {} })
+		table.insert(station.pads, { center = center + Vector3.new(0, 0.35, 0), board = label, ring = ring, occupants = {} })
 	end
 	table.insert(World.stations, station)
 end
 
-local function buildHall(lobby: Model)
-	block(lobby, Vector3.new(80, 1, 200), CFrame.new(0, -0.5, 0), C.Metal, "Floor")
-	block(lobby, Vector3.new(16, 0.05, 200), CFrame.new(0, 0.025, 0), Color3.fromRGB(12, 12, 16), "Walkway")
-	neon(lobby, Vector3.new(0.4, 0.06, 200), CFrame.new(-8, 0.03, 0), C.Purple)
-	neon(lobby, Vector3.new(0.4, 0.06, 200), CFrame.new(8, 0.03, 0), C.Gold)
-	for z = -80, 80, 20 do -- chevrons pointing toward the range door
-		neon(lobby, Vector3.new(0.5, 0.07, 4), CFrame.new(-1.3, 0.035, z) * CFrame.Angles(0, math.rad(-35), 0), C.Light)
-		neon(lobby, Vector3.new(0.5, 0.07, 4), CFrame.new(1.3, 0.035, z) * CFrame.Angles(0, math.rad(35), 0), C.Light)
+-- One arm of the + : floor, side walls, end wall, neon trims and a title over the entrance.
+-- at(along, lateral, y) converts arm-local coordinates to world space.
+local function buildArm(lobby: Model, arm)
+	local dir, w = arm.dir, arm.width
+	local perp = Vector3.new(dir.Z, 0, -dir.X)
+	local function at(along: number, lateral: number, y: number): Vector3
+		return dir * along + perp * lateral + Vector3.new(0, y, 0)
 	end
+	local s0 = math.sqrt((R + 0.5) ^ 2 - (w / 2 + 0.5) ^ 2)
+	local e = R + arm.length
+	local len = e - s0
+	local mid = (s0 + e) / 2
+	block(lobby, Vector3.new(w, 1, len + 2), CFrame.lookAt(at(mid - 1, 0, -0.5), at(mid - 1, 0, -0.5) + dir), C.Metal, "Floor")
+	for _, sideSign in { -1, 1 } do
+		local wallPos = at(mid, sideSign * (w / 2 + 0.5), WALL_H / 2)
+		block(lobby, Vector3.new(1, WALL_H, len), CFrame.lookAt(wallPos, wallPos + dir), C.MetalLight)
+		for _, y in { 1, 20 } do
+			local trimPos = at(mid, sideSign * (w / 2 - 0.1), y)
+			neon(lobby, Vector3.new(0.3, 0.4, len), CFrame.lookAt(trimPos, trimPos + dir), arm.trim)
+		end
+	end
+	local endPos = at(e + 0.5, 0, WALL_H / 2)
+	block(lobby, Vector3.new(w + 2, WALL_H, 1), CFrame.lookAt(endPos, endPos + dir), C.MetalLight)
+	sign(lobby, at(R + 1, 0, 19), -dir, Vector2.new(math.min(w - 6, 30), 4), arm.title, arm.trim)
+	return at, e
+end
 
-	-- Walls with neon trims; the back wall has a door to the firing range.
-	block(lobby, Vector3.new(1, 30, 200), CFrame.new(-40.5, 15, 0), C.MetalLight)
-	block(lobby, Vector3.new(1, 30, 200), CFrame.new(40.5, 15, 0), C.MetalLight)
-	block(lobby, Vector3.new(82, 30, 1), CFrame.new(0, 15, 100.5), C.MetalLight)
-	block(lobby, Vector3.new(30, 30, 1), CFrame.new(-25, 15, -100.5), C.MetalLight)
-	block(lobby, Vector3.new(30, 30, 1), CFrame.new(25, 15, -100.5), C.MetalLight)
-	block(lobby, Vector3.new(20, 18, 1), CFrame.new(0, 21, -100.5), C.MetalLight)
-	for _, sx in { -1, 1 } do
-		neon(lobby, Vector3.new(0.3, 0.4, 200), CFrame.new(sx * 39.9, 1, 0), C.Gold)
-		neon(lobby, Vector3.new(0.3, 0.4, 200), CFrame.new(sx * 39.9, 24, 0), C.Purple)
+local function buildHub(lobby: Model)
+	disc(lobby, Vector3.new(0, -0.5, 0), R * 2 + 2, 1, C.Metal)
+	disc(lobby, Vector3.new(0, 0.03, 0), R * 2 - 4, 0.06, C.Purple, Enum.Material.Neon)
+	disc(lobby, Vector3.new(0, 0.04, 0), R * 2 - 6, 0.08, C.Metal)
+
+	-- Circular wall from short segments, leaving an opening for each arm.
+	local n = 48
+	local segment = 2 * math.pi * (R + 0.5) / n + 0.4
+	for i = 0, n - 1 do
+		local a = (i + 0.5) / n * 2 * math.pi
+		local p = Vector3.new(math.sin(a), 0, math.cos(a)) * (R + 0.5)
+		local open = false
+		for _, arm in ARMS do
+			local perp = Vector3.new(arm.dir.Z, 0, -arm.dir.X)
+			if p:Dot(arm.dir) > 0 and math.abs(p:Dot(perp)) < arm.width / 2 + 1 then
+				open = true
+			end
+		end
+		if not open then
+			local wallPos = p + Vector3.new(0, WALL_H / 2, 0)
+			block(lobby, Vector3.new(segment, WALL_H, 1), CFrame.lookAt(wallPos, Vector3.new(0, WALL_H / 2, 0)), C.MetalLight)
+			local trimPos = p * ((R - 0.1) / (R + 0.5)) + Vector3.new(0, 1, 0)
+			neon(lobby, Vector3.new(segment, 0.4, 0.3), CFrame.lookAt(trimPos, Vector3.new(0, 1, 0)), C.Purple)
+		end
 	end
-	neon(lobby, Vector3.new(20, 0.4, 0.3), CFrame.new(0, 12, -99.9), C.Purple)
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
 	spawn.Size = Vector3.new(8, 1, 8)
-	spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, 88), Vector3.new(0, 0.5, 0))
+	spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, 0), Vector3.new(0, 0.5, 1)) -- face the pads arm
 	spawn.Color = C.Purple
 	spawn.Material = Enum.Material.Neon
 	spawn.Duration = 0
 	spawn.Neutral = true
 	spawn.Parent = lobby
+end
 
-	local forward = Vector3.new(0, 0, 1)
-	sign(lobby, Vector3.new(0, 23, -99.8), forward, Vector2.new(36, 7), "ANTITHESIS", C.Light)
-	sign(lobby, Vector3.new(0, 14, -99.8), forward, Vector2.new(16, 2.5), "FIRING RANGE", C.Gold)
-	board = sign(lobby, Vector3.new(-39.6, 12, 80), Vector3.new(1, 0, 0), Vector2.new(24, 16), "WEEKLY WINS", C.Light)
-	sign(lobby, Vector3.new(39.6, 12, 80), Vector3.new(-1, 0, 0), Vector2.new(24, 14),
-		"STAND ON A PAD TO QUEUE\nFirst to 5 rounds wins\n[M] Loadout   •   Shop on the left\nHold E near a player to challenge", C.Light)
-
-	for i, mode in Config.Lobby.Stations do
+local function buildPadsArm(lobby: Model, at)
+	block(lobby, Vector3.new(12, 0.05, 170), CFrame.new(0, 0.025, R + 85), Color3.fromRGB(12, 12, 16), "Walkway")
+	neon(lobby, Vector3.new(0.4, 0.06, 170), CFrame.new(-6, 0.03, R + 85), C.Purple)
+	neon(lobby, Vector3.new(0.4, 0.06, 170), CFrame.new(6, 0.03, R + 85), C.Gold)
+	for i, mode in L.Stations do
 		buildStation(lobby, i, mode)
+	end
+	board = sign(lobby, at(R + 170 - 0.4, 0, 12), Vector3.new(0, 0, -1), Vector2.new(24, 16), "WEEKLY WINS", C.Light)
+	sign(lobby, Vector3.new(-29.6, 10, R + 6), Vector3.new(1, 0, 0), Vector2.new(14, 9),
+		"STAND ON A PAD TO QUEUE\nFirst to 5 rounds wins\nHold E near a player to challenge", C.Light)
+end
+
+local function buildShopArm(lobby: Model, at)
+	local stands = { { 14, -13 }, { 28, -13 }, { 42, -13 }, { 21, 13 }, { 35, 13 } }
+	for i, name in Config.PaletteOrder do
+		local spot = stands[i]
+		if not spot then
+			break
+		end
+		local base = at(R + spot[1], spot[2], 0)
+		block(lobby, Vector3.new(4, 3, 4), CFrame.new(base + Vector3.new(0, 1.5, 0)), C.MetalLight, "Pedestal")
+		neon(lobby, Vector3.new(4.2, 0.2, 4.2), CFrame.new(base + Vector3.new(0, 3.05, 0)), C.Gold)
+		local model = WeaponModels.build("Paragon", name)
+		for _, part in model:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.Anchored = true
+			end
+		end
+		model:PivotTo(CFrame.new(base + Vector3.new(0, 4.6, 0)) * CFrame.Angles(0, math.rad(90), math.rad(-15)))
+		model.Parent = lobby
+		local pal = Config.Palettes[name]
+		local price = pal.price == 0 and "FREE" or pal.price and (pal.price .. " COINS") or "ROBUX"
+		local facing = Vector3.new(0, 0, -math.sign(base.Z)) -- toward the walkway
+		sign(lobby, base + Vector3.new(0, 1.5, 0) + facing * 2.05, facing, Vector2.new(3.8, 2.4), string.upper(name) .. "\n" .. price, C.Gold)
+	end
+	sign(lobby, at(R + 60 - 0.4, 0, 12), Vector3.new(-1, 0, 0), Vector2.new(28, 9), "COSMETICS SHOP\nWalk in to browse", C.Gold)
+end
+
+local function buildQuestsArm(lobby: Model, at)
+	sign(lobby, at(R + 60 - 0.4, 0, 12), Vector3.new(1, 0, 0), Vector2.new(28, 12), "DAILY QUESTS\n3 new quests every day\nWalk in to see yours", C.Good)
+	for _, lateral in { -14, 14 } do
+		for along = 12, 48, 18 do
+			local p = at(R + along, lateral, 0)
+			block(lobby, Vector3.new(2, WALL_H, 2), CFrame.new(p + Vector3.new(0, WALL_H / 2, 0)), C.MetalLight, "Pillar")
+			neon(lobby, Vector3.new(2.2, 0.4, 2.2), CFrame.new(p + Vector3.new(0, 6, 0)), C.Good)
+		end
 	end
 end
 
+local function buildRangeArm(lobby: Model, at)
+	local padCenter = at(R + 28, 0, 0)
+	glowPad(lobby, padCenter, C.Ally)
+	sign(lobby, at(R + 40 - 0.4, 0, 10), Vector3.new(0, 0, 1), Vector2.new(20, 7), "FIRING RANGE\nStep on the pad to teleport", C.Ally)
+	local c = L.Range.center
+	local arrive = Vector3.new(c.X, 3, c.Z + L.Range.size.Z / 2 - 6)
+	table.insert(World.teleports, {
+		center = padCenter + Vector3.new(0, 0.35, 0),
+		target = CFrame.lookAt(arrive, arrive + Vector3.new(0, 0, -1)),
+	})
+end
+
+-- The firing range is a separate room 200 studs past the lobby; a pad inside teleports back.
 local function buildRange(lobby: Model)
-	local c, s = Config.Lobby.RangeCenter, Config.Lobby.RangeSize
-	local front, back = c.Z + s.Z / 2, c.Z - s.Z / 2
-	block(lobby, Vector3.new(s.X, 1, s.Z), CFrame.new(c.X, -0.5, c.Z), C.MetalLight, "RangeFloor")
-	block(lobby, Vector3.new(1, 24, s.Z), CFrame.new(c.X - s.X / 2 - 0.5, 12, c.Z), C.MetalLight)
-	block(lobby, Vector3.new(1, 24, s.Z), CFrame.new(c.X + s.X / 2 + 0.5, 12, c.Z), C.MetalLight)
-	block(lobby, Vector3.new(s.X + 2, 24, 1), CFrame.new(c.X, 12, back - 0.5), C.MetalLight)
-	block(lobby, Vector3.new(30, 0.05, s.Z), CFrame.new(c.X, 0.025, c.Z), C.Metal, "RangeLane")
-	local line = front - 8
+	local c, size = L.Range.center, L.Range.size
+	local front, back = c.Z + size.Z / 2, c.Z - size.Z / 2
+	block(lobby, Vector3.new(size.X, 1, size.Z), CFrame.new(c.X, -0.5, c.Z), C.MetalLight, "RangeFloor")
+	walls(lobby, Vector3.new(c.X, 0, c.Z), size.X, size.Z, WALL_H, C.MetalLight)
+	block(lobby, Vector3.new(30, 0.05, size.Z), CFrame.new(c.X, 0.025, c.Z), C.Metal, "RangeLane")
+	local line = front - 12
 	neon(lobby, Vector3.new(30, 0.06, 0.5), CFrame.new(c.X, 0.03, line), C.Gold)
+
+	local backPad = Vector3.new(c.X + 22, 0, front - 6)
+	glowPad(lobby, backPad, C.Purple)
+	sign(lobby, Vector3.new(c.X + 22, 9, front - 0.4), Vector3.new(0, 0, -1), Vector2.new(12, 4), "BACK TO LOBBY", C.Purple)
+	local lobbyArrive = Vector3.new(0, 3, -(R + 8))
+	table.insert(World.teleports, {
+		center = backPad + Vector3.new(0, 0.35, 0),
+		target = CFrame.lookAt(lobbyArrive, Vector3.new(0, 3, 0)),
+	})
 
 	local dummies = Instance.new("Folder")
 	dummies.Name = "Dummies"
 	dummies.Parent = workspace
 	for i, d in { 15, 30, 45, 60, 75 } do
-		dummy(dummies, Vector3.new(({ -10, 8, -4, 10, 0 })[i], 0, line - d))
+		dummy(dummies, Vector3.new(c.X + ({ -10, 8, -4, 10, 0 })[i], 0, line - d))
 	end
+	assert(back < line - 75, "range too short for dummies")
+end
+
+local function buildLobby(lobby: Model)
+	buildHub(lobby)
+	for _, arm in ARMS do
+		local at = buildArm(lobby, arm)
+		if arm.key == "Pads" then
+			buildPadsArm(lobby, at)
+		elseif arm.key == "Shop" then
+			buildShopArm(lobby, at)
+		elseif arm.key == "Quests" then
+			buildQuestsArm(lobby, at)
+		else
+			buildRangeArm(lobby, at)
+		end
+	end
+	buildRange(lobby)
 end
 
 ---------------------------------------------------------------- arenas
@@ -1951,8 +2190,7 @@ function World.build()
 	map.Parent = workspace
 	local lobby = Instance.new("Model")
 	lobby.Name = "Lobby"
-	buildHall(lobby)
-	buildRange(lobby)
+	buildLobby(lobby)
 	lobby.Parent = map
 end
 
@@ -2394,9 +2632,11 @@ local C = Config.Colors
 local GREY = Color3.fromRGB(90, 92, 98)
 local player = Players.LocalPlayer
 
-local sideBar, coinsLabel, fovLabel
+local sideBar, coinsLabel, fovLabel, questsButton
 local loadoutPanel, loadoutRows, doneButton
 local shopPanel, shopList, shopCoins
+local questsPanel, questsList
+local zone: string? = nil -- lobby walk-in zone the player is standing in ("Shop" / "Quests")
 local padPill, toastLabel
 local resultsPanel, resultsTitle, resultsScore, resultsLines, unlockBar, unlockText, rematchButton
 local challengePanel, challengeText
@@ -2448,6 +2688,10 @@ local function buildLoadout()
 			}, function()
 				if owned then
 					Net.Event:FireServer("Pick", slot, id)
+				elseif p.coins >= w.price then
+					Net.Event:FireServer("Unlock", id)
+				else
+					Menus.toast("Need " .. (w.price - p.coins) .. " more coins for " .. string.upper(id))
 				end
 			end)
 		end
@@ -2486,19 +2730,6 @@ local function buildShop()
 			end)
 		end
 	end
-	for _, slot in Config.Slots do
-		for _, id in Config.Order[slot] do
-			local w = Config.Weapons[id]
-			local sub = slot .. " - " .. w.class
-			if p.unlocked[id] then
-				row(string.upper(id), sub, "OWNED")
-			else
-				row(string.upper(id), sub, w.price .. " COINS", "UNLOCK", p.coins >= w.price, function()
-					Net.Event:FireServer("Unlock", id)
-				end)
-			end
-		end
-	end
 	for _, name in Config.PaletteOrder do
 		local pal = Config.Palettes[name]
 		local title = string.upper(name) .. " PALETTE"
@@ -2521,6 +2752,56 @@ local function buildShop()
 	end
 end
 
+---------------------------------------------------------------- quests
+
+local questById = {}
+for _, q in Config.Quests do
+	questById[q.id] = q
+end
+
+local function claimable(): number
+	local n = 0
+	for _, entry in State.profile and State.profile.quests or {} do
+		local q = questById[entry.id]
+		if q and not entry.claimed and entry.progress >= q.goal then
+			n += 1
+		end
+	end
+	return n
+end
+
+local function buildQuests()
+	clear(questsList)
+	local p = State.profile
+	if not p then
+		return
+	end
+	for i, entry in p.quests do
+		local q = questById[entry.id]
+		if q then
+			local done = entry.progress >= q.goal
+			local r = UI.new("Frame", { Size = UDim2.new(1, -12, 0, 70), BackgroundColor3 = Color3.fromRGB(60, 62, 68), LayoutOrder = i, Parent = questsList }, { UI.new("UICorner") })
+			UI.label({ Text = q.text, Position = UDim2.fromOffset(14, 8), Size = UDim2.fromOffset(300, 24), TextXAlignment = Enum.TextXAlignment.Left, Parent = r })
+			UI.label({ Text = "+" .. q.reward .. " COINS", Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -170, 0, 24), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.Gold, Parent = r })
+			local back = UI.new("Frame", { Position = UDim2.fromOffset(14, 36), Size = UDim2.new(1, -180, 0, 12), BackgroundColor3 = GREY, BorderSizePixel = 0, Parent = r })
+			UI.new("Frame", { Size = UDim2.fromScale(math.clamp(entry.progress / q.goal, 0, 1), 1), BackgroundColor3 = done and C.Good or C.Ally, BorderSizePixel = 0, Parent = back })
+			UI.label({ Text = entry.progress .. " / " .. q.goal, Position = UDim2.fromOffset(14, 50), Size = UDim2.fromOffset(200, 16), TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13, Parent = r })
+			UI.button(entry.claimed and "CLAIMED" or "CLAIM", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -10, 0.5, 0),
+				Size = UDim2.fromOffset(130, 40),
+				AutoButtonColor = done and not entry.claimed,
+				BackgroundColor3 = (done and not entry.claimed) and C.Good or GREY,
+				Parent = r,
+			}, function()
+				if done and not entry.claimed then
+					Net.Event:FireServer("ClaimQuest", i)
+				end
+			end)
+		end
+	end
+end
+
 ---------------------------------------------------------------- public
 
 function Menus.refresh()
@@ -2530,11 +2811,16 @@ function Menus.refresh()
 	end
 	coinsLabel.Text = p.coins .. " COINS  •  " .. p.wins .. " WINS"
 	fovLabel.Text = "FOV " .. p.fov
+	local ready = claimable()
+	questsButton.Text = ready > 0 and ("QUESTS (" .. ready .. ")") or "QUESTS"
 	if shopPanel.Visible then
 		buildShop()
 	end
 	if loadoutPanel.Visible then
 		buildLoadout()
+	end
+	if questsPanel.Visible then
+		buildQuests()
 	end
 end
 
@@ -2543,6 +2829,7 @@ function Menus.phase(ph)
 	if ph then
 		loadoutPanel.Visible = false
 		shopPanel.Visible = false
+		questsPanel.Visible = false
 		resultsPanel.Visible = false
 		challengePanel.Visible = false
 	end
@@ -2577,6 +2864,7 @@ function Menus.results(data)
 	rematchButton.Text = "REMATCH"
 	loadoutPanel.Visible = false
 	shopPanel.Visible = false
+	questsPanel.Visible = false
 	resultsPanel.Visible = true
 	focus(rematchButton)
 end
@@ -2603,36 +2891,45 @@ function Menus.toast(text: string)
 	end)
 end
 
-local function openLoadout()
+-- Lobby panels: only one open at a time. show = nil toggles.
+local function setPanel(name: string, show: boolean?)
 	if State.phase then
 		return
 	end
-	shopPanel.Visible = false
-	loadoutPanel.Visible = not loadoutPanel.Visible
-	if loadoutPanel.Visible then
-		buildLoadout()
-		focus(doneButton)
+	local panels = { Loadout = loadoutPanel, Shop = shopPanel, Quests = questsPanel }
+	local target = panels[name]
+	local visible = if show == nil then not target.Visible else show
+	for key, panel in panels do
+		panel.Visible = key == name and visible
+	end
+	if visible then
+		if name == "Loadout" then
+			buildLoadout()
+			focus(doneButton)
+		elseif name == "Shop" then
+			buildShop()
+		else
+			buildQuests()
+		end
 	end
 end
 
-local function openShop()
-	if State.phase then
-		return
-	end
-	loadoutPanel.Visible = false
-	shopPanel.Visible = not shopPanel.Visible
-	if shopPanel.Visible then
-		buildShop()
-	end
+local function openLoadout()
+	setPanel("Loadout")
 end
 
 function Menus.init(gui: ScreenGui)
 	-- Left-side lobby menu (Rivals-style buttons).
-	sideBar = UI.new("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 16, 0.5, 0), Size = UDim2.fromOffset(200, 250), BackgroundTransparency = 1, Parent = gui })
+	sideBar = UI.new("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 16, 0.5, 0), Size = UDim2.fromOffset(200, 310), BackgroundTransparency = 1, Parent = gui })
 	list(sideBar, 8)
 	coinsLabel = UI.label({ Text = "", TextColor3 = C.Gold, Size = UDim2.fromOffset(200, 24), TextStrokeTransparency = 0.5, Parent = sideBar })
 	UI.button("LOADOUT [M]", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Ally, Parent = sideBar }, openLoadout)
-	UI.button("SHOP", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Gold, Parent = sideBar }, openShop)
+	UI.button("SHOP", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Gold, Parent = sideBar }, function()
+		setPanel("Shop")
+	end)
+	questsButton = UI.button("QUESTS", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Good, Parent = sideBar }, function()
+		setPanel("Quests")
+	end)
 	local fovRow = UI.new("Frame", { Size = UDim2.fromOffset(200, 40), BackgroundTransparency = 1, Parent = sideBar })
 	local function fov(delta: number)
 		local p = State.profile
@@ -2653,7 +2950,7 @@ function Menus.init(gui: ScreenGui)
 	-- Loadout
 	loadoutPanel = UI.panel({ Size = UDim2.fromOffset(780, 400), Parent = gui })
 	UI.label({ Text = "LOADOUT", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(300, 30), TextSize = 26, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = loadoutPanel })
-	UI.label({ Text = "Locked in for the whole match. Unlock more in the Shop.", Position = UDim2.fromOffset(20, 42), Size = UDim2.new(1, -40, 0, 20), TextSize = 14, TextColor3 = Color3.fromRGB(170, 170, 175), TextXAlignment = Enum.TextXAlignment.Left, Parent = loadoutPanel })
+	UI.label({ Text = "Locked in for the whole match. Click a locked weapon to unlock it with coins.", Position = UDim2.fromOffset(20, 42), Size = UDim2.new(1, -40, 0, 20), TextSize = 14, TextColor3 = Color3.fromRGB(170, 170, 175), TextXAlignment = Enum.TextXAlignment.Left, Parent = loadoutPanel })
 	loadoutRows = UI.new("Frame", { Position = UDim2.fromOffset(20, 70), Size = UDim2.new(1, -40, 0, 260), BackgroundTransparency = 1, Parent = loadoutPanel })
 	list(loadoutRows, 6)
 	doneButton = UI.button("DONE", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -14), BackgroundColor3 = C.Ally, Parent = loadoutPanel }, function()
@@ -2669,7 +2966,7 @@ function Menus.init(gui: ScreenGui)
 
 	-- Shop
 	shopPanel = UI.panel({ Size = UDim2.fromOffset(580, 500), Parent = gui })
-	UI.label({ Text = "SHOP", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(200, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = shopPanel })
+	UI.label({ Text = "COSMETICS", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(200, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = shopPanel })
 	shopCoins = UI.label({ Position = UDim2.fromOffset(220, 16), Size = UDim2.fromOffset(200, 30), TextColor3 = C.Gold, Parent = shopPanel })
 	UI.button("CLOSE", { Position = UDim2.new(1, -120, 0, 12), Size = UDim2.fromOffset(100, 36), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = shopPanel }, function()
 		shopPanel.Visible = false
@@ -2684,6 +2981,16 @@ function Menus.init(gui: ScreenGui)
 		Parent = shopPanel,
 	})
 	list(shopList, 6)
+
+	-- Quests
+	questsPanel = UI.panel({ Size = UDim2.fromOffset(560, 340), Parent = gui })
+	UI.label({ Text = "DAILY QUESTS", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(300, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = questsPanel })
+	UI.label({ Text = "New quests every day. Progress counts in matches.", Position = UDim2.fromOffset(20, 46), Size = UDim2.fromOffset(400, 20), TextSize = 14, TextColor3 = Color3.fromRGB(170, 170, 175), TextXAlignment = Enum.TextXAlignment.Left, Parent = questsPanel })
+	UI.button("CLOSE", { Position = UDim2.new(1, -120, 0, 12), Size = UDim2.fromOffset(100, 36), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = questsPanel }, function()
+		questsPanel.Visible = false
+	end)
+	questsList = UI.new("Frame", { Position = UDim2.fromOffset(10, 76), Size = UDim2.new(1, -20, 1, -86), BackgroundTransparency = 1, Parent = questsPanel })
+	list(questsList, 8)
 
 	padPill = UI.label({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(460, 40), TextSize = 20, BackgroundTransparency = 0.15, BackgroundColor3 = C.Metal, TextColor3 = C.Light, Visible = false, Parent = gui })
 	UI.new("UICorner", { CornerRadius = UDim.new(0, 8), Parent = padPill })
@@ -2732,7 +3039,27 @@ function Menus.init(gui: ScreenGui)
 	end, false, Enum.KeyCode.M, Enum.KeyCode.ButtonSelect)
 
 	RunService.RenderStepped:Connect(function()
-		State.menuOpen = loadoutPanel.Visible or shopPanel.Visible or resultsPanel.Visible or challengePanel.Visible
+		-- Walk-in zones: entering the shop or quests arm opens its panel, leaving closes it.
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local now = nil
+		if root and State.phase == nil then
+			for _, name in { "Shop", "Quests" } do
+				if Config.inZone(Config.Lobby[name], root.Position) then
+					now = name
+				end
+			end
+		end
+		if now ~= zone then
+			if zone then
+				setPanel(zone, false)
+			end
+			if now then
+				setPanel(now, true)
+			end
+			zone = now
+		end
+
+		State.menuOpen = loadoutPanel.Visible or shopPanel.Visible or questsPanel.Visible or resultsPanel.Visible or challengePanel.Visible
 		local pad = State.pad
 		padPill.Visible = pad ~= nil and State.phase == nil
 		if padPill.Visible then

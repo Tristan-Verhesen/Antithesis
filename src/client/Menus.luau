@@ -16,9 +16,11 @@ local C = Config.Colors
 local GREY = Color3.fromRGB(90, 92, 98)
 local player = Players.LocalPlayer
 
-local sideBar, coinsLabel, fovLabel
+local sideBar, coinsLabel, fovLabel, questsButton
 local loadoutPanel, loadoutRows, doneButton
 local shopPanel, shopList, shopCoins
+local questsPanel, questsList
+local zone: string? = nil -- lobby walk-in zone the player is standing in ("Shop" / "Quests")
 local padPill, toastLabel
 local resultsPanel, resultsTitle, resultsScore, resultsLines, unlockBar, unlockText, rematchButton
 local challengePanel, challengeText
@@ -70,6 +72,10 @@ local function buildLoadout()
 			}, function()
 				if owned then
 					Net.Event:FireServer("Pick", slot, id)
+				elseif p.coins >= w.price then
+					Net.Event:FireServer("Unlock", id)
+				else
+					Menus.toast("Need " .. (w.price - p.coins) .. " more coins for " .. string.upper(id))
 				end
 			end)
 		end
@@ -108,19 +114,6 @@ local function buildShop()
 			end)
 		end
 	end
-	for _, slot in Config.Slots do
-		for _, id in Config.Order[slot] do
-			local w = Config.Weapons[id]
-			local sub = slot .. " - " .. w.class
-			if p.unlocked[id] then
-				row(string.upper(id), sub, "OWNED")
-			else
-				row(string.upper(id), sub, w.price .. " COINS", "UNLOCK", p.coins >= w.price, function()
-					Net.Event:FireServer("Unlock", id)
-				end)
-			end
-		end
-	end
 	for _, name in Config.PaletteOrder do
 		local pal = Config.Palettes[name]
 		local title = string.upper(name) .. " PALETTE"
@@ -143,6 +136,56 @@ local function buildShop()
 	end
 end
 
+---------------------------------------------------------------- quests
+
+local questById = {}
+for _, q in Config.Quests do
+	questById[q.id] = q
+end
+
+local function claimable(): number
+	local n = 0
+	for _, entry in State.profile and State.profile.quests or {} do
+		local q = questById[entry.id]
+		if q and not entry.claimed and entry.progress >= q.goal then
+			n += 1
+		end
+	end
+	return n
+end
+
+local function buildQuests()
+	clear(questsList)
+	local p = State.profile
+	if not p then
+		return
+	end
+	for i, entry in p.quests do
+		local q = questById[entry.id]
+		if q then
+			local done = entry.progress >= q.goal
+			local r = UI.new("Frame", { Size = UDim2.new(1, -12, 0, 70), BackgroundColor3 = Color3.fromRGB(60, 62, 68), LayoutOrder = i, Parent = questsList }, { UI.new("UICorner") })
+			UI.label({ Text = q.text, Position = UDim2.fromOffset(14, 8), Size = UDim2.fromOffset(300, 24), TextXAlignment = Enum.TextXAlignment.Left, Parent = r })
+			UI.label({ Text = "+" .. q.reward .. " COINS", Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -170, 0, 24), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.Gold, Parent = r })
+			local back = UI.new("Frame", { Position = UDim2.fromOffset(14, 36), Size = UDim2.new(1, -180, 0, 12), BackgroundColor3 = GREY, BorderSizePixel = 0, Parent = r })
+			UI.new("Frame", { Size = UDim2.fromScale(math.clamp(entry.progress / q.goal, 0, 1), 1), BackgroundColor3 = done and C.Good or C.Ally, BorderSizePixel = 0, Parent = back })
+			UI.label({ Text = entry.progress .. " / " .. q.goal, Position = UDim2.fromOffset(14, 50), Size = UDim2.fromOffset(200, 16), TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13, Parent = r })
+			UI.button(entry.claimed and "CLAIMED" or "CLAIM", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -10, 0.5, 0),
+				Size = UDim2.fromOffset(130, 40),
+				AutoButtonColor = done and not entry.claimed,
+				BackgroundColor3 = (done and not entry.claimed) and C.Good or GREY,
+				Parent = r,
+			}, function()
+				if done and not entry.claimed then
+					Net.Event:FireServer("ClaimQuest", i)
+				end
+			end)
+		end
+	end
+end
+
 ---------------------------------------------------------------- public
 
 function Menus.refresh()
@@ -152,11 +195,16 @@ function Menus.refresh()
 	end
 	coinsLabel.Text = p.coins .. " COINS  •  " .. p.wins .. " WINS"
 	fovLabel.Text = "FOV " .. p.fov
+	local ready = claimable()
+	questsButton.Text = ready > 0 and ("QUESTS (" .. ready .. ")") or "QUESTS"
 	if shopPanel.Visible then
 		buildShop()
 	end
 	if loadoutPanel.Visible then
 		buildLoadout()
+	end
+	if questsPanel.Visible then
+		buildQuests()
 	end
 end
 
@@ -165,6 +213,7 @@ function Menus.phase(ph)
 	if ph then
 		loadoutPanel.Visible = false
 		shopPanel.Visible = false
+		questsPanel.Visible = false
 		resultsPanel.Visible = false
 		challengePanel.Visible = false
 	end
@@ -199,6 +248,7 @@ function Menus.results(data)
 	rematchButton.Text = "REMATCH"
 	loadoutPanel.Visible = false
 	shopPanel.Visible = false
+	questsPanel.Visible = false
 	resultsPanel.Visible = true
 	focus(rematchButton)
 end
@@ -225,36 +275,45 @@ function Menus.toast(text: string)
 	end)
 end
 
-local function openLoadout()
+-- Lobby panels: only one open at a time. show = nil toggles.
+local function setPanel(name: string, show: boolean?)
 	if State.phase then
 		return
 	end
-	shopPanel.Visible = false
-	loadoutPanel.Visible = not loadoutPanel.Visible
-	if loadoutPanel.Visible then
-		buildLoadout()
-		focus(doneButton)
+	local panels = { Loadout = loadoutPanel, Shop = shopPanel, Quests = questsPanel }
+	local target = panels[name]
+	local visible = if show == nil then not target.Visible else show
+	for key, panel in panels do
+		panel.Visible = key == name and visible
+	end
+	if visible then
+		if name == "Loadout" then
+			buildLoadout()
+			focus(doneButton)
+		elseif name == "Shop" then
+			buildShop()
+		else
+			buildQuests()
+		end
 	end
 end
 
-local function openShop()
-	if State.phase then
-		return
-	end
-	loadoutPanel.Visible = false
-	shopPanel.Visible = not shopPanel.Visible
-	if shopPanel.Visible then
-		buildShop()
-	end
+local function openLoadout()
+	setPanel("Loadout")
 end
 
 function Menus.init(gui: ScreenGui)
 	-- Left-side lobby menu (Rivals-style buttons).
-	sideBar = UI.new("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 16, 0.5, 0), Size = UDim2.fromOffset(200, 250), BackgroundTransparency = 1, Parent = gui })
+	sideBar = UI.new("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 16, 0.5, 0), Size = UDim2.fromOffset(200, 310), BackgroundTransparency = 1, Parent = gui })
 	list(sideBar, 8)
 	coinsLabel = UI.label({ Text = "", TextColor3 = C.Gold, Size = UDim2.fromOffset(200, 24), TextStrokeTransparency = 0.5, Parent = sideBar })
 	UI.button("LOADOUT [M]", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Ally, Parent = sideBar }, openLoadout)
-	UI.button("SHOP", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Gold, Parent = sideBar }, openShop)
+	UI.button("SHOP", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Gold, Parent = sideBar }, function()
+		setPanel("Shop")
+	end)
+	questsButton = UI.button("QUESTS", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Good, Parent = sideBar }, function()
+		setPanel("Quests")
+	end)
 	local fovRow = UI.new("Frame", { Size = UDim2.fromOffset(200, 40), BackgroundTransparency = 1, Parent = sideBar })
 	local function fov(delta: number)
 		local p = State.profile
@@ -275,7 +334,7 @@ function Menus.init(gui: ScreenGui)
 	-- Loadout
 	loadoutPanel = UI.panel({ Size = UDim2.fromOffset(780, 400), Parent = gui })
 	UI.label({ Text = "LOADOUT", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(300, 30), TextSize = 26, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = loadoutPanel })
-	UI.label({ Text = "Locked in for the whole match. Unlock more in the Shop.", Position = UDim2.fromOffset(20, 42), Size = UDim2.new(1, -40, 0, 20), TextSize = 14, TextColor3 = Color3.fromRGB(170, 170, 175), TextXAlignment = Enum.TextXAlignment.Left, Parent = loadoutPanel })
+	UI.label({ Text = "Locked in for the whole match. Click a locked weapon to unlock it with coins.", Position = UDim2.fromOffset(20, 42), Size = UDim2.new(1, -40, 0, 20), TextSize = 14, TextColor3 = Color3.fromRGB(170, 170, 175), TextXAlignment = Enum.TextXAlignment.Left, Parent = loadoutPanel })
 	loadoutRows = UI.new("Frame", { Position = UDim2.fromOffset(20, 70), Size = UDim2.new(1, -40, 0, 260), BackgroundTransparency = 1, Parent = loadoutPanel })
 	list(loadoutRows, 6)
 	doneButton = UI.button("DONE", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -14), BackgroundColor3 = C.Ally, Parent = loadoutPanel }, function()
@@ -291,7 +350,7 @@ function Menus.init(gui: ScreenGui)
 
 	-- Shop
 	shopPanel = UI.panel({ Size = UDim2.fromOffset(580, 500), Parent = gui })
-	UI.label({ Text = "SHOP", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(200, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = shopPanel })
+	UI.label({ Text = "COSMETICS", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(200, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = shopPanel })
 	shopCoins = UI.label({ Position = UDim2.fromOffset(220, 16), Size = UDim2.fromOffset(200, 30), TextColor3 = C.Gold, Parent = shopPanel })
 	UI.button("CLOSE", { Position = UDim2.new(1, -120, 0, 12), Size = UDim2.fromOffset(100, 36), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = shopPanel }, function()
 		shopPanel.Visible = false
@@ -306,6 +365,16 @@ function Menus.init(gui: ScreenGui)
 		Parent = shopPanel,
 	})
 	list(shopList, 6)
+
+	-- Quests
+	questsPanel = UI.panel({ Size = UDim2.fromOffset(560, 340), Parent = gui })
+	UI.label({ Text = "DAILY QUESTS", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(300, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = questsPanel })
+	UI.label({ Text = "New quests every day. Progress counts in matches.", Position = UDim2.fromOffset(20, 46), Size = UDim2.fromOffset(400, 20), TextSize = 14, TextColor3 = Color3.fromRGB(170, 170, 175), TextXAlignment = Enum.TextXAlignment.Left, Parent = questsPanel })
+	UI.button("CLOSE", { Position = UDim2.new(1, -120, 0, 12), Size = UDim2.fromOffset(100, 36), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = questsPanel }, function()
+		questsPanel.Visible = false
+	end)
+	questsList = UI.new("Frame", { Position = UDim2.fromOffset(10, 76), Size = UDim2.new(1, -20, 1, -86), BackgroundTransparency = 1, Parent = questsPanel })
+	list(questsList, 8)
 
 	padPill = UI.label({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40), Size = UDim2.fromOffset(460, 40), TextSize = 20, BackgroundTransparency = 0.15, BackgroundColor3 = C.Metal, TextColor3 = C.Light, Visible = false, Parent = gui })
 	UI.new("UICorner", { CornerRadius = UDim.new(0, 8), Parent = padPill })
@@ -354,7 +423,27 @@ function Menus.init(gui: ScreenGui)
 	end, false, Enum.KeyCode.M, Enum.KeyCode.ButtonSelect)
 
 	RunService.RenderStepped:Connect(function()
-		State.menuOpen = loadoutPanel.Visible or shopPanel.Visible or resultsPanel.Visible or challengePanel.Visible
+		-- Walk-in zones: entering the shop or quests arm opens its panel, leaving closes it.
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local now = nil
+		if root and State.phase == nil then
+			for _, name in { "Shop", "Quests" } do
+				if Config.inZone(Config.Lobby[name], root.Position) then
+					now = name
+				end
+			end
+		end
+		if now ~= zone then
+			if zone then
+				setPanel(zone, false)
+			end
+			if now then
+				setPanel(now, true)
+			end
+			zone = now
+		end
+
+		State.menuOpen = loadoutPanel.Visible or shopPanel.Visible or questsPanel.Visible or resultsPanel.Visible or challengePanel.Visible
 		local pad = State.pad
 		padPill.Visible = pad ~= nil and State.phase == nil
 		if padPill.Visible then

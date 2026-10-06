@@ -28,6 +28,7 @@ local handlers = {
 	ChallengeReply = Match.challengeReply,
 	Rematch = Match.rematch,
 	Unlock = Data.unlock,
+	ClaimQuest = Data.claimQuest,
 	Palette = Data.setPalette,
 	Fov = Data.setFov,
 }
