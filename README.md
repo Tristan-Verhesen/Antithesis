@@ -35,8 +35,7 @@ The full design is in [`GAME_DESIGN.md`](GAME_DESIGN.md). Everything is code: th
 
 ## Quick test (no setup)
 1. Download **`Antithesis.rbxlx`** from this repo and double-click it to open it in Roblox Studio.
-2. Go to **File → Game Settings → Avatar** and set the avatar type to **R6**. If this option is greyed out, publish the place first (**File → Publish to Roblox**).
-3. Press **Play** to try the firing range alone. To test a duel, open the **Test** tab, set **Clients and Servers** to 2 players, then click **Start**. In each player window, press **M** and choose **DUEL 1v1**.
+2. Press **Play** to try the firing range alone. To test a duel, open the **Test** tab, set **Clients and Servers** to 2 players, then click **Start**. In each player window, press **M** and choose **DUEL 1v1**.
 
 Coins only save after you publish and turn on **Game Settings → Security → Enable Studio Access to API Services**. Until then the game still runs, but progress resets each session.
 
@@ -49,7 +48,7 @@ Coins only save after you publish and turn on **Game Settings → Security → E
 3. In Studio, create a **Baseplate** place.
 4. Go to **Plugins → Rojo → Connect**. The code syncs in. The scripts delete the baseplate and build the map when you press Play.
 5. **File → Publish to Roblox**, then set **Game Settings**:
-   - **Avatar → Avatar Type: R6.** Every player then has the same hitbox size.
+   - **Avatar → Avatar Type: R6.** The place file already sets this, but check it after publishing. R6 gives every player the same hitbox size.
    - **Security → Enable Studio Access to API Services**, so coins save while testing.
 6. Test a duel: open the **Test** tab, set **Clients and Servers** to 2 players, then click **Start**. In each client, press **M** and choose **DUEL 1v1**.
 

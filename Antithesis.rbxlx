@@ -1,0 +1,3407 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="2">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[-- All tuning lives here. Change numbers, not code.
+local Config = {}
+
+Config.Colors = {
+	Light = Color3.fromRGB(232, 230, 225),
+	Dark = Color3.fromRGB(43, 45, 49),
+	Ally = Color3.fromRGB(34, 211, 238),
+	Enemy = Color3.fromRGB(251, 146, 60),
+	Gold = Color3.fromRGB(250, 204, 21),
+	Good = Color3.fromRGB(74, 222, 128),
+	Bad = Color3.fromRGB(239, 68, 68),
+}
+
+Config.Movement = {
+	WalkSpeed = 18,
+	CrouchSpeed = 9,
+	AdsMult = 0.65,
+	CrouchDrop = 2.5, -- camera drop in studs
+	SlideMinSpeed = 14,
+	SlideStart = 30,
+	SlideEnd = 12,
+	SlideTime = 0.75,
+	SlideCooldown = 1.0,
+	DashDistance = 20,
+	DashTime = 0.18,
+	DashRecharge = 4.0,
+	MaxAvgSpeed = 60, -- server anti-speed check, studs/s averaged over 0.5s
+}
+
+Config.Modes = {
+	Duel = { teamSize = 1, winsNeeded = 3, liveTime = 60, label = "DUEL 1v1" },
+	Doubles = { teamSize = 2, winsNeeded = 3, liveTime = 75, label = "DOUBLES 2v2" },
+}
+
+Config.Match = {
+	BlindPick = 12,
+	ThesisPick = 5,
+	AntithesisPick = 7,
+	Countdown = 3,
+	Collapse = 15,
+	CollapseDps = 20,
+	CollapseMinRadius = 8,
+	RoundEnd = 3,
+	ResultsTime = 8, -- rematch window
+	EloWindow = 100, -- grows by this every EloWindowEvery seconds waited
+	EloWindowEvery = 5,
+	EloK = 32,
+	RewindCap = 0.2,
+}
+
+Config.Rewards = {
+	Win = 40,
+	Loss = 15,
+	StreakBonus = 5,
+	StreakMax = 25,
+	Banner = 5,
+	FirstWin = 100,
+	MinDamage = 100,
+	Daily = { 25, 25, 50, 50, 75, 75, 150 },
+}
+
+-- slot: Primary/Secondary/Melee/Utility. interval = seconds between shots.
+-- falloff = {fullRange, minRange, minMultiplier}. spread/adsSpread in degrees.
+Config.Weapons = {
+	Paragon = { slot = "Primary", class = "Assault Rifle", auto = true, damage = 24, head = 48, interval = 0.1, mag = 30, reload = 2.0, falloff = { 70, 140, 0.75 }, spread = 2, adsSpread = 0.3, recoil = 0.5, speed = 1.0, adsFov = 55, price = 0 },
+	Breaker = { slot = "Primary", class = "Pump Shotgun", pellets = 10, damage = 12, head = 18, interval = 0.83, mag = 6, reload = 0.45, perShell = true, falloff = { 10, 30, 0.3 }, spread = 6, adsSpread = 4.5, recoil = 3, speed = 0.97, adsFov = 60, price = 0 },
+	Hornet = { slot = "Primary", class = "SMG", auto = true, damage = 17, head = 30, interval = 60 / 900, mag = 34, reload = 1.7, falloff = { 25, 60, 0.55 }, spread = 2.5, adsSpread = 1, recoil = 0.35, speed = 1.05, adsFov = 60, price = 150 },
+	Triad = { slot = "Primary", class = "Burst Rifle", burst = 3, burstDelay = 0.32, damage = 30, head = 60, interval = 60 / 1100, mag = 24, reload = 2.1, falloff = { 80, 160, 0.8 }, spread = 1.5, adsSpread = 0.2, recoil = 0.6, speed = 1.0, adsFov = 50, price = 400 },
+	Meridian = { slot = "Primary", class = "Bolt Sniper", scope = true, damage = 95, head = 250, interval = 1.4, mag = 5, reload = 2.6, spread = 8, adsSpread = 0, recoil = 4, speed = 0.92, adsFov = 20, price = 600 },
+	Ward = { slot = "Secondary", class = "Pistol", damage = 22, head = 50, interval = 0.15, mag = 12, reload = 1.3, falloff = { 40, 90, 0.7 }, spread = 1.5, adsSpread = 0.3, recoil = 0.8, speed = 1.0, adsFov = 60, price = 0 },
+	Verdict = { slot = "Secondary", class = "Revolver", damage = 50, head = 110, interval = 0.46, mag = 6, reload = 2.2, falloff = { 50, 110, 0.7 }, spread = 2, adsSpread = 0, recoil = 3, speed = 1.0, adsFov = 55, price = 300 },
+	Edge = { slot = "Melee", class = "Knife", damage = 45, backstab = 100, interval = 0.4, range = 7, speed = 1.1, price = 0 },
+	Glare = { slot = "Utility", class = "Flash", charges = 2, fuse = 1.2, blind = 2.0, peripheral = 0.8, price = 0 },
+	Veil = { slot = "Utility", class = "Smoke", charges = 1, fuse = 1.0, radius = 11, duration = 7, price = 250 },
+	Crack = { slot = "Utility", class = "Frag", charges = 1, fuse = 2.4, damage = 100, minDamage = 25, innerRadius = 3, radius = 10, price = 400 },
+}
+
+Config.Range = 500
+Config.LimbMult = 0.85
+Config.Slots = { "Primary", "Secondary", "Melee", "Utility" }
+Config.Order = {
+	Primary = { "Paragon", "Breaker", "Hornet", "Triad", "Meridian" },
+	Secondary = { "Ward", "Verdict" },
+	Melee = { "Edge" },
+	Utility = { "Glare", "Veil", "Crack" },
+}
+Config.Starter = { Primary = "Paragon", Secondary = "Ward", Melee = "Edge", Utility = "Glare" }
+
+-- Thesis item -> suggested Antithesis answers (pick-screen hints)
+Config.Counters = {
+	Meridian = { "Veil", "Hornet", "Breaker" },
+	Breaker = { "Paragon", "Triad", "Crack" },
+	Hornet = { "Triad", "Meridian", "Glare" },
+	Paragon = { "Triad", "Breaker" },
+	Triad = { "Hornet", "Meridian" },
+	Veil = { "Glare", "Crack" },
+}
+
+-- Weapon palettes (skins). price = Coins; gamePass = Robux Game Pass id (0 = not on sale yet).
+Config.Palettes = {
+	Default = { body = Color3.fromRGB(43, 45, 49), accent = Color3.fromRGB(232, 230, 225), price = 0 },
+	Chrome = { body = Color3.fromRGB(190, 195, 200), accent = Color3.fromRGB(60, 64, 70), material = Enum.Material.Metal, price = 300 },
+	Ember = { body = Color3.fromRGB(40, 20, 15), accent = Color3.fromRGB(255, 120, 40), price = 500 },
+	Void = { body = Color3.fromRGB(15, 10, 30), accent = Color3.fromRGB(160, 90, 255), price = 800 },
+	Neon = { body = Color3.fromRGB(20, 20, 24), accent = Color3.fromRGB(34, 211, 238), neon = true, gamePass = 0 },
+}
+Config.PaletteOrder = { "Default", "Chrome", "Ember", "Void", "Neon" }
+
+-- Built-in engine sounds so it works out of the box. Swap for Creator Store sound ids ("rbxassetid://123").
+Config.Sounds = {
+	Shot = "rbxasset://sounds/Rocket shot.wav",
+	Hit = "rbxasset://sounds/clickfast.wav",
+	Headshot = "rbxasset://sounds/collide.wav",
+	Kill = "rbxasset://sounds/electronicpingshort.wav",
+	Melee = "rbxasset://sounds/swordslash.wav",
+	Lock = "rbxasset://sounds/swordlunge.wav",
+	Button = "rbxasset://sounds/button.wav",
+}
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Net</string>
+          <string name="Source"><![CDATA[-- One reliable RemoteEvent for everything ("Action", ...args) and one unreliable one for cosmetic FX.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+if RunService:IsServer() and not ReplicatedStorage:FindFirstChild("Remotes") then
+	local folder = Instance.new("Folder")
+	folder.Name = "Remotes"
+	local event = Instance.new("RemoteEvent")
+	event.Name = "Net"
+	event.Parent = folder
+	local fx = Instance.new("UnreliableRemoteEvent")
+	fx.Name = "FX"
+	fx.Parent = folder
+	folder.Parent = ReplicatedStorage
+end
+
+local folder = ReplicatedStorage:WaitForChild("Remotes")
+return {
+	Event = folder:WaitForChild("Net") :: RemoteEvent,
+	FX = folder:WaitForChild("FX") :: UnreliableRemoteEvent,
+}
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">WeaponModels</string>
+          <string name="Source"><![CDATA[-- Builds low-poly weapon models from boxes so no assets are needed.
+-- Model space: grip at origin, barrel points toward -Z. Part = {sx, sy, sz, x, y, z, accent?, shape?}
+local Config = require(script.Parent.Config)
+
+local SPECS = {
+	Paragon = { muzzle = Vector3.new(0, 0.15, -2.9), parts = {
+		{ 0.4, 0.5, 2.2, 0, 0.1, -0.7 },
+		{ 0.18, 0.18, 1.2, 0, 0.15, -2.3, true },
+		{ 0.3, 0.7, 0.35, 0, -0.45, -0.9, true },
+		{ 0.3, 0.45, 1.0, 0, 0, 0.8 },
+		{ 0.1, 0.15, 0.6, 0, 0.42, -0.6, true },
+	} },
+	Breaker = { muzzle = Vector3.new(0, 0.2, -2.8), parts = {
+		{ 0.45, 0.5, 1.6, 0, 0.1, -0.5 },
+		{ 0.22, 0.22, 1.6, 0, 0.2, -2.0, true },
+		{ 0.3, 0.3, 0.8, 0, -0.1, -1.6, true },
+		{ 0.35, 0.5, 1.0, 0, 0, 0.8 },
+	} },
+	Hornet = { muzzle = Vector3.new(0, 0.15, -1.7), parts = {
+		{ 0.35, 0.5, 1.4, 0, 0.1, -0.4 },
+		{ 0.15, 0.15, 0.6, 0, 0.15, -1.4, true },
+		{ 0.22, 0.9, 0.25, 0, -0.55, -0.3, true },
+		{ 0.15, 0.3, 0.7, 0, 0, 0.6 },
+	} },
+	Triad = { muzzle = Vector3.new(0, 0.15, -2.6), parts = {
+		{ 0.4, 0.55, 2.0, 0, 0.1, -0.6 },
+		{ 0.2, 0.2, 1.0, 0, 0.15, -2.1, true },
+		{ 0.3, 0.6, 0.35, 0, -0.45, -0.7, true },
+		{ 0.35, 0.5, 0.9, 0, 0, 0.75 },
+		{ 0.25, 0.25, 0.4, 0, 0.45, -0.5, true },
+	} },
+	Meridian = { muzzle = Vector3.new(0, 0.15, -3.8), parts = {
+		{ 0.4, 0.5, 2.4, 0, 0.1, -0.8 },
+		{ 0.15, 0.15, 1.8, 0, 0.15, -2.9, true },
+		{ 0.3, 0.3, 1.2, 0, 0.5, -0.7, true },
+		{ 0.35, 0.6, 1.2, 0, -0.05, 0.9 },
+		{ 0.3, 0.08, 0.08, 0.25, 0.2, -0.2, true },
+	} },
+	Ward = { muzzle = Vector3.new(0, 0.15, -0.85), parts = {
+		{ 0.25, 0.35, 1.0, 0, 0.15, -0.3 },
+		{ 0.22, 0.55, 0.3, 0, -0.2, 0, true },
+	} },
+	Verdict = { muzzle = Vector3.new(0, 0.2, -1.25), parts = {
+		{ 0.2, 0.2, 1.2, 0, 0.2, -0.6 },
+		{ 0.35, 0.35, 0.4, 0, 0.1, -0.1, true },
+		{ 0.22, 0.55, 0.3, 0, -0.25, 0.15, true },
+	} },
+	Edge = { muzzle = Vector3.new(0, 0, -1.4), parts = {
+		{ 0.2, 0.2, 0.6, 0, 0, 0 },
+		{ 0.05, 0.25, 1.1, 0, 0.02, -0.85, true },
+	} },
+	Grenade = { muzzle = Vector3.zero, parts = {
+		{ 0.6, 0.6, 0.6, 0, 0, 0, true, Enum.PartType.Ball },
+	} },
+}
+
+local WeaponModels = {}
+
+function WeaponModels.build(id: string, paletteName: string?): Model
+	local spec = SPECS[id] or SPECS.Grenade
+	local palette = Config.Palettes[paletteName or "Default"] or Config.Palettes.Default
+	local model = Instance.new("Model")
+	model.Name = id
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.2, 0.2, 0.2)
+	handle.Transparency = 1
+	handle.Massless = true
+	handle.CanCollide = false
+	handle.CanQuery = false
+	handle.CanTouch = false
+	handle.Parent = model
+	model.PrimaryPart = handle
+
+	local muzzle = Instance.new("Attachment")
+	muzzle.Name = "Muzzle"
+	muzzle.Position = spec.muzzle
+	muzzle.Parent = handle
+
+	for _, p in spec.parts do
+		local part = Instance.new("Part")
+		part.Shape = p[8] or Enum.PartType.Block
+		part.Size = Vector3.new(p[1], p[2], p[3])
+		part.CFrame = CFrame.new(p[4], p[5], p[6])
+		part.Color = p[7] and palette.accent or palette.body
+		part.Material = (p[7] and palette.neon) and Enum.Material.Neon or palette.material or Enum.Material.SmoothPlastic
+		part.Massless = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.CastShadow = false
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = handle
+		weld.Part1 = part
+		weld.Parent = part
+		part.Parent = model
+	end
+	return model
+end
+
+return WeaponModels
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="5">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="6">
+      <Properties>
+        <string name="Name">Server</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[-- Server entry point: builds the world, wires remotes, sets up players.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+Players.CharacterAutoLoads = false
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+local World = require(script.World)
+local Data = require(script.Data)
+local Combat = require(script.Combat)
+local Match = require(script.Match)
+
+World.build()
+Combat.start()
+Data.start(World)
+Match.start(World.arenas)
+
+local handlers = {
+	Hello = Data.push,
+	Fire = Combat.fire,
+	Reload = Combat.reload,
+	Melee = Combat.melee,
+	Throw = Combat.throw,
+	Equip = Combat.equip,
+	Queue = Match.queue,
+	Cancel = Match.leaveQueue,
+	Pick = Match.pick,
+	Ready = Match.ready,
+	ChallengeReply = Match.challengeReply,
+	Rematch = Match.rematch,
+	Unlock = Data.unlock,
+	Palette = Data.setPalette,
+	Fov = Data.setFov,
+}
+
+Net.Event.OnServerEvent:Connect(function(player, action, ...)
+	local handler = type(action) == "string" and handlers[action]
+	if handler then
+		handler(player, ...)
+	end
+end)
+
+local function noQuery(d: Instance)
+	if d:IsA("BasePart") and d:FindFirstAncestorOfClass("Accessory") then
+		d.CanQuery = false -- hats never block or absorb bullets
+	end
+end
+
+local function onCharacter(player: Player, char: Model)
+	Combat.clear(player)
+	if player:GetAttribute("MatchId") == 0 then
+		Combat.reset(player)
+	end
+	for _, d in char:GetDescendants() do
+		noQuery(d)
+	end
+	char.DescendantAdded:Connect(noQuery)
+
+	local root = char:WaitForChild("HumanoidRootPart")
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Challenge"
+	prompt.ObjectText = player.DisplayName
+	prompt.HoldDuration = 0.3
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	prompt.Enabled = player:GetAttribute("MatchId") == 0
+	prompt.Parent = root
+	prompt.Triggered:Connect(function(who)
+		if who ~= player then
+			Match.challenge(who, player)
+		end
+	end)
+
+	char:WaitForChild("Humanoid").Died:Connect(function()
+		if player:GetAttribute("MatchId") == 0 then
+			task.delay(2, function()
+				if player.Parent and player:GetAttribute("MatchId") == 0 then
+					player:LoadCharacter()
+				end
+			end)
+		end
+	end)
+end
+
+local function onPlayer(player: Player)
+	player:SetAttribute("MatchId", 0)
+	player:SetAttribute("Team", 0)
+	local p = Data.load(player)
+	if not player.Parent then
+		return
+	end
+	for _, slot in Config.Slots do
+		local id = p.loadout[slot]
+		local w = Config.Weapons[id]
+		player:SetAttribute(slot, (w and w.slot == slot and p.unlocked[id]) and id or Config.Starter[slot])
+	end
+	player:SetAttribute("Palette", p.palettes[p.palette] and p.palette or "Default")
+	player.CameraMode = Enum.CameraMode.LockFirstPerson
+	player.DevEnableMouseLock = false -- Shift is Dash, not shift-lock
+	player.CharacterAdded:Connect(function(char)
+		onCharacter(player, char)
+	end)
+	player:LoadCharacter()
+	Data.push(player)
+end
+
+Players.PlayerAdded:Connect(onPlayer)
+for _, player in Players:GetPlayers() do
+	task.spawn(onPlayer, player)
+end
+Players.PlayerRemoving:Connect(function(player)
+	Match.onLeave(player)
+	Data.release(player)
+end)
+]]></string>
+      </Properties>
+      <Item class="ModuleScript" referent="7">
+        <Properties>
+          <string name="Name">Combat</string>
+          <string name="Source"><![CDATA[-- Server-authoritative combat: validates every shot (fire rate, ammo, origin, lag-compensated rewind, line of sight).
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+local WeaponModels = require(ReplicatedStorage.Shared.WeaponModels)
+
+local Combat = {}
+
+-- Hooks wired up by Match.
+Combat.canDamage = function(_attacker: Player, _victim: Player): boolean
+	return false
+end
+Combat.onDamage = function(_attacker: Player, _victim: Player, _amount: number) end
+Combat.onKill = function(_attacker: Player?, _victim: Player, _weaponId: string, _info) end
+Combat.audience = function(player: Player): { Player }
+	return { player }
+end
+
+local BODY = { Torso = true, HumanoidRootPart = true, UpperTorso = true, LowerTorso = true }
+local state = {}
+local history = {}
+local lastPos = {}
+local mapParams = RaycastParams.new()
+mapParams.FilterType = Enum.RaycastFilterType.Include
+
+local function now(): number
+	return workspace:GetServerTimeNow()
+end
+
+local function rootAt(player: Player, root: BasePart, t: number): CFrame
+	local h = history[player]
+	if not h or #h == 0 then
+		return root.CFrame
+	end
+	for i = #h, 1, -1 do
+		local e = h[i]
+		if e[1] <= t then
+			local n = h[i + 1]
+			if not n then
+				return e[2]
+			end
+			return e[2]:Lerp(n[2], (t - e[1]) / (n[1] - e[1]))
+		end
+	end
+	return h[1][2]
+end
+
+local function targetOf(part: any)
+	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then
+		return nil
+	end
+	local model = part:FindFirstAncestorOfClass("Model")
+	local hum = model and model:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then
+		return nil
+	end
+	return model, hum, Players:GetPlayerFromCharacter(model)
+end
+
+local function allowed(attacker: Player, model: Model, victim: Player?): boolean
+	if victim then
+		return victim ~= attacker and Combat.canDamage(attacker, victim)
+	end
+	return model:GetAttribute("Dummy") == true and attacker:GetAttribute("MatchId") == 0
+end
+
+local function validHit(origin: Vector3, dir: Vector3, part: BasePart, victim: Player?, t: number): boolean
+	local center = part.Position
+	if victim then
+		local root = victim.Character and victim.Character:FindFirstChild("HumanoidRootPart")
+		if not root then
+			return false
+		end
+		center = (rootAt(victim, root, t) * root.CFrame:ToObjectSpace(part.CFrame)).Position
+	end
+	local toC = center - origin
+	local along = toC:Dot(dir)
+	if along < 0 or along > Config.Range then
+		return false
+	end
+	if (toC - dir * along).Magnitude > part.Size.Magnitude / 2 + 1.5 then
+		return false
+	end
+	return workspace:Raycast(origin, dir * math.max(along - 1, 0.01), mapParams) == nil
+end
+
+local function damageFor(w, part: BasePart, dist: number): number
+	local head = part.Name == "Head"
+	local dmg = head and w.head or w.damage
+	if not head and not BODY[part.Name] then
+		dmg *= Config.LimbMult
+	end
+	if w.falloff then
+		local a, b, m = w.falloff[1], w.falloff[2], w.falloff[3]
+		dmg *= dist <= a and 1 or dist >= b and m or 1 - (1 - m) * (dist - a) / (b - a)
+	end
+	return dmg
+end
+
+local function alive(player: Player)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if hum and root and hum.Health > 0 and not root.Anchored then
+		return char, root
+	end
+	return nil
+end
+
+function Combat.applyDamage(attacker: Player?, model: Model, hum: Humanoid, victim: Player?, amount: number, weaponId: string, info): boolean
+	if hum.Health <= 0 then
+		return false
+	end
+	amount = math.floor(amount + 0.5)
+	local lethal = amount >= hum.Health
+	if model:GetAttribute("Dummy") then
+		hum.Health = lethal and hum.MaxHealth or hum.Health - amount
+	else
+		hum.Health = math.max(hum.Health - amount, 0)
+	end
+	if victim then
+		if attacker then
+			Combat.onDamage(attacker, victim, amount)
+		end
+		local root = attacker and attacker.Character and attacker.Character:FindFirstChild("HumanoidRootPart")
+		Net.Event:FireClient(victim, "Damaged", root and root.Position)
+		if lethal then
+			Combat.onKill(attacker, victim, weaponId, info)
+		end
+	end
+	return lethal
+end
+
+function Combat.reset(player: Player)
+	local s = { ammo = {}, reloadUntil = {}, tokens = {}, last = {}, charges = 0, lastMelee = 0 }
+	for _, slot in Config.Slots do
+		local id = player:GetAttribute(slot)
+		local w = Config.Weapons[id]
+		if w and w.mag then
+			s.ammo[id] = w.mag
+		elseif w and w.charges then
+			s.charges = w.charges
+		end
+	end
+	state[player] = s
+	player:SetAttribute("Charges", s.charges)
+end
+
+function Combat.clear(player: Player)
+	history[player] = nil
+	lastPos[player] = nil
+end
+
+function Combat.equip(player: Player, slot: any)
+	if type(slot) ~= "number" or not Config.Slots[slot] or slot > 3 then
+		return
+	end
+	local id = player:GetAttribute(Config.Slots[slot])
+	local char = player.Character
+	local arm = char and (char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand"))
+	if not (id and arm) then
+		return
+	end
+	local old = char:FindFirstChild("HeldWeapon")
+	if old then
+		old:Destroy()
+	end
+	local model = WeaponModels.build(id, player:GetAttribute("Palette"))
+	model.Name = "HeldWeapon"
+	local weld = Instance.new("Weld")
+	weld.Part0 = arm
+	weld.Part1 = model.PrimaryPart
+	weld.C0 = CFrame.new(0, -1, -0.5)
+	weld.Parent = model.PrimaryPart
+	model.Parent = char
+end
+
+function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fireTime: any, scoped: any)
+	local s = state[player]
+	local w = Config.Weapons[weaponId]
+	if not (s and w and w.mag) or typeof(origin) ~= "Vector3" or type(shots) ~= "table" or type(fireTime) ~= "number" then
+		return
+	end
+	local char = alive(player)
+	if not char or player:GetAttribute(w.slot) ~= weaponId then
+		return
+	end
+	if (origin - char.Head.Position).Magnitude > 8 then
+		return
+	end
+	local t = now()
+	if (s.reloadUntil[weaponId] or 0) > t or s.ammo[weaponId] <= 0 then
+		return
+	end
+	-- Token bucket: tolerates network bunching but caps sustained fire rate.
+	local avg = (w.burst and (w.burstDelay + (w.burst - 1) * w.interval) / w.burst or w.interval) * 0.9
+	local cap = w.burst or 2
+	local tokens = math.min(cap, (s.tokens[weaponId] or cap) + (t - (s.last[weaponId] or 0)) / avg)
+	if tokens < 1 then
+		return
+	end
+	s.tokens[weaponId] = tokens - 1
+	s.last[weaponId] = t
+	s.ammo[weaponId] -= 1
+
+	local rewindTo = math.clamp(fireTime, t - Config.Match.RewindCap, t)
+	local hits = {}
+	for i = 1, math.min(#shots, w.pellets or 1) do
+		local shot = shots[i]
+		if type(shot) ~= "table" then
+			continue
+		end
+		local dir, part, pos = shot[1], shot[2], shot[3]
+		if typeof(dir) ~= "Vector3" or typeof(pos) ~= "Vector3" or math.abs(dir.Magnitude - 1) > 0.05 then
+			continue
+		end
+		local model, hum, victim = targetOf(part)
+		if model and allowed(player, model, victim) and validHit(origin, dir, part, victim, rewindTo) then
+			local h = hits[model] or { hum = hum, victim = victim, dmg = 0, head = false }
+			hits[model] = h
+			h.dmg += damageFor(w, part, (pos - origin).Magnitude)
+			h.head = h.head or part.Name == "Head"
+		end
+	end
+	for model, h in hits do
+		local killed = Combat.applyDamage(player, model, h.hum, h.victim, h.dmg, weaponId, { head = h.head, scoped = scoped == true })
+		Net.Event:FireClient(player, "Hit", math.floor(h.dmg + 0.5), h.head, killed)
+	end
+	local endPos = type(shots[1]) == "table" and shots[1][3]
+	if typeof(endPos) == "Vector3" then
+		for _, other in Combat.audience(player) do
+			if other ~= player then
+				Net.FX:FireClient(other, "Tracer", origin, endPos)
+			end
+		end
+	end
+end
+
+function Combat.reload(player: Player, weaponId: any)
+	local s, w = state[player], Config.Weapons[weaponId]
+	if not (s and w and s.ammo[weaponId]) then
+		return
+	end
+	local t = now()
+	if s.ammo[weaponId] >= w.mag or (s.reloadUntil[weaponId] or 0) > t then
+		return
+	end
+	-- Finish slightly before the client does so latency never rejects the first shot after a reload.
+	local ready = (w.perShell and w.reload * (w.mag - s.ammo[weaponId]) or w.reload) * 0.8
+	s.reloadUntil[weaponId] = t + ready
+	task.delay(ready, function()
+		if state[player] == s then
+			s.ammo[weaponId] = w.mag
+		end
+	end)
+end
+
+function Combat.melee(player: Player, part: any)
+	local s = state[player]
+	local id = player:GetAttribute("Melee")
+	local w = Config.Weapons[id]
+	local t = now()
+	if not (s and w) or t - s.lastMelee < w.interval * 0.8 then
+		return
+	end
+	s.lastMelee = t
+	local char, root = alive(player)
+	local model, hum, victim = targetOf(part)
+	if not (char and model and allowed(player, model, victim)) then
+		return
+	end
+	local troot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+	local toTarget = (troot.Position - root.Position) * Vector3.new(1, 0, 1)
+	if toTarget.Magnitude > w.range + 3 then
+		return
+	end
+	local behind = toTarget.Magnitude > 0.1 and troot.CFrame.LookVector:Dot(toTarget.Unit) > 0.5
+	local dmg = behind and w.backstab or w.damage
+	local killed = Combat.applyDamage(player, model, hum, victim, dmg, id, { backstab = behind })
+	Net.Event:FireClient(player, "Hit", dmg, false, killed)
+end
+
+local function frag(attacker: Player, pos: Vector3, w)
+	local e = Instance.new("Explosion")
+	e.Position = pos
+	e.BlastPressure = 0
+	e.BlastRadius = w.radius
+	e.DestroyJointRadiusPercent = 0
+	e.Parent = workspace
+	for _, p in Combat.audience(attacker) do
+		local char = p.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local torso = char and (char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
+		local selfHit = p == attacker and attacker:GetAttribute("MatchId") ~= 0
+		if hum and torso and (selfHit or Combat.canDamage(attacker, p)) then
+			local d = (torso.Position - pos).Magnitude
+			if d <= w.radius and not workspace:Raycast(pos, torso.Position - pos, mapParams) then
+				local dmg = d <= w.innerRadius and w.damage
+					or w.damage - (w.damage - w.minDamage) * (d - w.innerRadius) / (w.radius - w.innerRadius)
+				local killed = Combat.applyDamage(attacker, char, hum, p, dmg, "Crack", {})
+				if p ~= attacker then
+					Net.Event:FireClient(attacker, "Hit", math.floor(dmg), false, killed)
+				end
+			end
+		end
+	end
+end
+
+local function flash(attacker: Player, pos: Vector3, w)
+	local pop = Instance.new("Part")
+	pop.Shape = Enum.PartType.Ball
+	pop.Size = Vector3.one * 3
+	pop.Position = pos
+	pop.Anchored = true
+	pop.CanCollide = false
+	pop.CanQuery = false
+	pop.Material = Enum.Material.Neon
+	pop.Color = Color3.new(1, 1, 1)
+	pop.Parent = workspace
+	Debris:AddItem(pop, 0.15)
+	for _, p in Combat.audience(attacker) do
+		local head = p.Character and p.Character:FindFirstChild("Head")
+		local offset = head and pos - head.Position
+		if offset and offset.Magnitude < 80 and not workspace:Raycast(head.Position, offset, mapParams) then
+			local facing = head.CFrame.LookVector:Dot(offset.Unit) > 0.64
+			Net.Event:FireClient(p, "Flash", facing and w.blind or w.peripheral)
+		end
+	end
+end
+
+local function smoke(pos: Vector3, w)
+	local s = Instance.new("Part")
+	s.Shape = Enum.PartType.Ball
+	s.Size = Vector3.one * w.radius * 2
+	s.Position = pos
+	s.Anchored = true
+	s.CanCollide = false
+	s.CanQuery = false
+	s.CanTouch = false
+	s.CastShadow = false
+	s.Material = Enum.Material.SmoothPlastic
+	s.Color = Color3.fromRGB(205, 205, 210)
+	s.Transparency = 0.05
+	s.Parent = workspace
+	Debris:AddItem(s, w.duration)
+end
+
+function Combat.throw(player: Player, origin: any, dir: any)
+	local s = state[player]
+	local w = Config.Weapons[player:GetAttribute("Utility")]
+	local char = alive(player)
+	if not (s and w and char and s.charges > 0) or typeof(origin) ~= "Vector3" or typeof(dir) ~= "Vector3" then
+		return
+	end
+	if (origin - char.Head.Position).Magnitude > 8 or dir.Magnitude < 0.5 then
+		return
+	end
+	s.charges -= 1
+	player:SetAttribute("Charges", s.charges)
+	dir = dir.Unit
+	local g = Instance.new("Part")
+	g.Shape = Enum.PartType.Ball
+	g.Size = Vector3.one * 0.8
+	g.Color = Config.Colors.Gold
+	g.Material = Enum.Material.Neon
+	g.CanQuery = false
+	g.CFrame = CFrame.new(origin + dir * 2)
+	g.Parent = workspace
+	g:SetNetworkOwner(nil)
+	g.AssemblyLinearVelocity = dir * 70 + Vector3.new(0, 12, 0)
+	task.delay(w.fuse, function()
+		local pos = g.Position
+		g:Destroy()
+		if w.class == "Frag" then
+			frag(player, pos, w)
+		elseif w.class == "Flash" then
+			flash(player, pos, w)
+		else
+			smoke(pos, w)
+		end
+	end)
+end
+
+function Combat.start()
+	mapParams.FilterDescendantsInstances = { workspace:WaitForChild("Map") }
+
+	-- Position history for lag compensation (1 second).
+	RunService.Heartbeat:Connect(function()
+		local t = now()
+		for _, player in Players:GetPlayers() do
+			local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+			if root then
+				local h = history[player] or {}
+				history[player] = h
+				table.insert(h, { t, root.CFrame })
+				if #h > 60 then
+					table.remove(h, 1)
+				end
+			end
+		end
+	end)
+
+	-- Movement sanity check: snap back players moving faster than any legal movement allows.
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			for _, player in Players:GetPlayers() do
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				if root and not root.Anchored then
+					local last = lastPos[player]
+					local flat = last and (root.Position - last) * Vector3.new(1, 0, 1)
+					if flat and flat.Magnitude / 0.5 > Config.Movement.MaxAvgSpeed then
+						root.CFrame = CFrame.new(last) * root.CFrame.Rotation
+					else
+						lastPos[player] = root.Position
+					end
+				end
+			end
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		state[player] = nil
+		Combat.clear(player)
+	end)
+end
+
+return Combat
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
+          <string name="Name">Data</string>
+          <string name="Source"><![CDATA[-- Player profiles (DataStore), coin shop, palettes, weekly wins board.
+local DataStoreService = game:GetService("DataStoreService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+
+local Data = {}
+local profiles: { [Player]: any } = {}
+local store, weekly
+pcall(function()
+	store = DataStoreService:GetDataStore("Antithesis_v1")
+	weekly = DataStoreService:GetOrderedDataStore("WeeklyWins_" .. os.time() // 604800)
+end)
+
+local function today(): number
+	return os.time() // 86400
+end
+
+local function default()
+	local unlocked = {}
+	for id, w in Config.Weapons do
+		if w.price == 0 then
+			unlocked[id] = true
+		end
+	end
+	return {
+		coins = 0,
+		unlocked = unlocked,
+		palettes = { Default = true },
+		palette = "Default",
+		loadout = table.clone(Config.Starter),
+		elo = 1000,
+		wins = 0,
+		losses = 0,
+		matches = 0,
+		streak = 0,
+		dayStreak = 0,
+		lastDay = 0,
+		lastWinDay = 0,
+		fov = 70,
+	}
+end
+
+function Data.get(player: Player)
+	return profiles[player]
+end
+
+function Data.push(player: Player)
+	local p = profiles[player]
+	if not p then
+		return
+	end
+	local stats = player:FindFirstChild("leaderstats")
+	if stats then
+		stats.Coins.Value = p.coins
+		stats.Wins.Value = p.wins
+	end
+	Net.Event:FireClient(player, "Profile", p)
+end
+
+function Data.load(player: Player)
+	local p, ok = default(), true
+	if store then
+		for _ = 1, 3 do
+			local success, saved = pcall(store.GetAsync, store, "u" .. player.UserId)
+			if success then
+				for k, v in saved or {} do
+					p[k] = v
+				end
+				ok = true
+				break
+			end
+			ok = false
+			task.wait(1)
+		end
+	end
+	p._noSave = not ok -- never overwrite real data with defaults after a failed load
+	profiles[player] = p
+
+	local stats = Instance.new("Folder")
+	stats.Name = "leaderstats"
+	Instance.new("IntValue", stats).Name = "Wins"
+	Instance.new("IntValue", stats).Name = "Coins"
+	stats.Parent = player
+
+	-- Game Pass palettes are owned on Roblox's side; re-check each join.
+	for name, pal in Config.Palettes do
+		if pal.gamePass and pal.gamePass ~= 0 then
+			local s, owns = pcall(MarketplaceService.UserOwnsGamePassAsync, MarketplaceService, player.UserId, pal.gamePass)
+			if s and owns then
+				p.palettes[name] = true
+			end
+		end
+	end
+	return p
+end
+
+function Data.save(player: Player)
+	local p = profiles[player]
+	if not (store and p) or p._noSave then
+		return
+	end
+	local copy = table.clone(p)
+	copy._noSave = nil
+	pcall(store.UpdateAsync, store, "u" .. player.UserId, function()
+		return copy
+	end)
+end
+
+function Data.release(player: Player)
+	Data.save(player)
+	profiles[player] = nil
+end
+
+function Data.addWeeklyWin(player: Player)
+	if weekly then
+		task.spawn(pcall, weekly.IncrementAsync, weekly, tostring(player.UserId), 1)
+	end
+end
+
+-- Coins for a finished match. Returns lines for the results screen.
+function Data.reward(player: Player, won: boolean, participated: boolean, banners: number)
+	local p = profiles[player]
+	local R = Config.Rewards
+	local lines = {}
+	local function add(label, amount)
+		if amount > 0 then
+			table.insert(lines, { label, amount })
+			p.coins += amount
+		end
+	end
+	p.matches += 1
+	if won then
+		p.wins += 1
+		p.streak += 1
+	else
+		p.losses += 1
+		p.streak = 0
+	end
+	if participated then
+		add(won and "Victory" or "Match played", won and R.Win or R.Loss)
+		if won then
+			add("Win streak x" .. p.streak, math.min((p.streak - 1) * R.StreakBonus, R.StreakMax))
+		end
+		add("Banners", banners * R.Banner)
+	end
+	local d = today()
+	if won and p.lastWinDay ~= d then
+		p.lastWinDay = d
+		add("First win of the day", R.FirstWin)
+	end
+	if p.lastDay ~= d then -- play-to-claim daily streak
+		p.dayStreak = (p.lastDay == d - 1) and (p.dayStreak % #R.Daily) + 1 or 1
+		p.lastDay = d
+		add("Daily streak day " .. p.dayStreak, R.Daily[p.dayStreak])
+	end
+	if won then
+		Data.addWeeklyWin(player)
+	end
+	return lines
+end
+
+function Data.unlock(player: Player, id: any)
+	local p = profiles[player]
+	local item = Config.Weapons[id] or Config.Palettes[id]
+	if not (p and item and item.price) then
+		return
+	end
+	local owned = Config.Weapons[id] and p.unlocked or p.palettes
+	if owned[id] or p.coins < item.price then
+		return
+	end
+	p.coins -= item.price
+	owned[id] = true
+	Data.push(player)
+end
+
+function Data.setPalette(player: Player, id: any)
+	local p = profiles[player]
+	if p and p.palettes[id] then
+		p.palette = id
+		player:SetAttribute("Palette", id)
+		Data.push(player)
+	end
+end
+
+function Data.setFov(player: Player, fov: any)
+	local p = profiles[player]
+	if p and type(fov) == "number" then
+		p.fov = math.clamp(math.floor(fov), 70, 90)
+	end
+end
+
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
+	local p = profiles[player]
+	if not (purchased and p) then
+		return
+	end
+	for name, pal in Config.Palettes do
+		if pal.gamePass == passId then
+			p.palettes[name] = true
+		end
+	end
+	Data.push(player)
+end)
+
+local names = {}
+local function refreshBoard(World)
+	if not weekly then
+		return
+	end
+	local ok, pages = pcall(weekly.GetSortedAsync, weekly, false, 10)
+	if not ok then
+		return
+	end
+	local lines = {}
+	for rank, entry in pages:GetCurrentPage() do
+		local id = tonumber(entry.key)
+		if not names[id] then
+			local s, name = pcall(Players.GetNameFromUserIdAsync, Players, id)
+			names[id] = s and name or "?"
+		end
+		table.insert(lines, rank .. ". " .. names[id] .. "  " .. entry.value)
+	end
+	World.setBoard(lines)
+end
+
+function Data.start(World)
+	task.spawn(function()
+		while true do
+			refreshBoard(World)
+			for player in profiles do
+				Data.save(player)
+			end
+			task.wait(60)
+		end
+	end)
+	game:BindToClose(function()
+		for player in profiles do
+			task.spawn(Data.save, player)
+		end
+		task.wait(3)
+	end)
+end
+
+return Data
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">Match</string>
+          <string name="Source"><![CDATA[-- Queues, in-server matchmaking, Counter-Pick round flow, scoring, rewards, rematch and challenges.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+local Combat = require(script.Parent.Combat)
+local Data = require(script.Parent.Data)
+
+local M = Config.Match
+local Match = {}
+local arenas = {}
+local queues = { Duel = {}, Doubles = {} }
+local byPlayer = {}
+local challenges = {}
+local rematch = {}
+local nextId = 0
+
+local function send(players: { Player }, ...)
+	for _, p in players do
+		if p.Parent then
+			Net.Event:FireClient(p, ...)
+		end
+	end
+end
+
+local function humOf(p: Player): Humanoid?
+	local hum = p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+	return (hum and hum.Health > 0) and hum or nil
+end
+
+local function loadoutOf(p: Player)
+	local l = {}
+	for _, slot in Config.Slots do
+		l[slot] = p:GetAttribute(slot)
+	end
+	return l
+end
+
+local function elo(p: Player): number
+	local d = Data.get(p)
+	return d and d.elo or 1000
+end
+
+local function banner(m, p: Player, text: string)
+	m.stats[p].banners += 1
+	Net.Event:FireClient(p, "Banner", text)
+end
+
+local function phase(m, name: string, duration: number)
+	m.phase = name
+	m.endsAt = workspace:GetServerTimeNow() + duration
+	for _, p in m.players do
+		if p.Parent then
+			Net.Event:FireClient(p, "Phase", {
+				phase = name,
+				endsAt = m.endsAt,
+				round = m.round,
+				score = m.score,
+				team = p:GetAttribute("Team"),
+				mode = m.mode,
+				arena = m.arena.name,
+				winsNeeded = m.cfg.winsNeeded,
+				canPick = m.picking[p] == true,
+				reveal = m.reveal,
+				roundWinner = m.roundWinner,
+			})
+		end
+	end
+end
+
+local function waitFor(m, seconds: number, done: (() -> boolean)?)
+	local deadline = os.clock() + seconds
+	while os.clock() < deadline and not m.over and not (done and done()) do
+		task.wait(0.1)
+	end
+end
+
+local function freeArena(mode: string)
+	local preferred = mode == "Doubles" and "Mirrorline" or "Fulcrum"
+	local any
+	for _, a in arenas do
+		if not a.busy then
+			if a.name == preferred then
+				return a
+			end
+			any = any or a
+		end
+	end
+	return any
+end
+
+function Match.leaveQueue(player: Player)
+	for _, q in queues do
+		for i = #q, 1, -1 do
+			if q[i].player == player then
+				table.remove(q, i)
+			end
+		end
+	end
+	if player.Parent then
+		Net.Event:FireClient(player, "Queue", nil)
+	end
+end
+
+function Match.queue(player: Player, mode: any)
+	if not queues[mode] or byPlayer[player] then
+		return
+	end
+	Match.leaveQueue(player)
+	table.insert(queues[mode], { player = player, t = os.clock() })
+	Net.Event:FireClient(player, "Queue", mode)
+end
+
+---------------------------------------------------------------- picking
+
+local function setPicking(m, team: number?)
+	m.picking, m.ready = {}, {}
+	for _, p in m.players do
+		if team == nil or p:GetAttribute("Team") == team then
+			m.picking[p] = true
+		end
+	end
+end
+
+local function allReady(m): boolean
+	for p in m.picking do
+		if p.Parent and byPlayer[p] == m and not m.ready[p] then
+			return false
+		end
+	end
+	return true
+end
+
+local function pickPhase(m)
+	local winner = m.lastWinner
+	m.reveal = nil
+	m.roundWinner = nil
+	if not winner then
+		setPicking(m, nil)
+		phase(m, "Pick", M.BlindPick)
+		waitFor(m, M.BlindPick, function()
+			return allReady(m)
+		end)
+	else
+		setPicking(m, winner)
+		phase(m, "Thesis", M.ThesisPick)
+		waitFor(m, M.ThesisPick, function()
+			return allReady(m)
+		end)
+		m.reveal = {}
+		for _, p in m.teams[winner] do
+			table.insert(m.reveal, { name = p.DisplayName, loadout = loadoutOf(p) })
+		end
+		send(m.players, "Reveal", m.reveal)
+		setPicking(m, 3 - winner)
+		phase(m, "Antithesis", M.AntithesisPick)
+		waitFor(m, M.AntithesisPick, function()
+			return allReady(m)
+		end)
+	end
+	m.picking = {}
+end
+
+function Match.pick(player: Player, slot: any, id: any)
+	local p = Data.get(player)
+	local w = Config.Weapons[id]
+	if not (p and w and w.slot == slot and p.unlocked[id]) then
+		return
+	end
+	local m = byPlayer[player]
+	if m and not m.picking[player] then
+		return
+	end
+	player:SetAttribute(slot, id)
+	p.loadout[slot] = id
+	if not m then
+		Combat.reset(player) -- lobby loadout change
+	end
+end
+
+function Match.ready(player: Player)
+	local m = byPlayer[player]
+	if m and m.picking[player] then
+		m.ready[player] = true
+	end
+end
+
+---------------------------------------------------------------- rounds
+
+local function spawnAll(m)
+	for t, team in m.teams do
+		for i, p in team do
+			if p.Parent and byPlayer[p] == m then
+				p:LoadCharacter()
+				local char = p.Character
+				if char then
+					char:PivotTo(m.arena.spawns[t][i])
+					char.HumanoidRootPart.Anchored = true
+					Combat.clear(p)
+					Combat.reset(p)
+				end
+			end
+		end
+	end
+end
+
+local function aliveIn(m, team: number): (number, number)
+	local n, hp = 0, 0
+	for _, p in m.teams[team] do
+		local hum = byPlayer[p] == m and humOf(p)
+		if hum then
+			n += 1
+			hp += hum.Health
+		end
+	end
+	return n, hp
+end
+
+local function makeRing(center: Vector3): Part
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.CanTouch = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = Config.Colors.Enemy
+	ring.Transparency = 0.75
+	ring.CFrame = CFrame.new(center + Vector3.new(0, 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = workspace
+	return ring
+end
+
+local function live(m): number
+	for _, p in m.players do
+		local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			root.Anchored = false
+		end
+		m.stats[p].roundKills = 0
+	end
+	m.clutch = {}
+	phase(m, "Live", m.cfg.liveTime)
+	local center = m.arena.origin
+	local ring, collapseStart
+	local result
+	while not m.over do
+		local a, hpA = aliveIn(m, 1)
+		local b, hpB = aliveIn(m, 2)
+		if m.mode == "Doubles" then
+			for t, n in { a, b } do
+				if n == 1 and (t == 1 and b or a) == 2 then
+					for _, p in m.teams[t] do
+						if humOf(p) then
+							m.clutch[p] = true
+						end
+					end
+				end
+			end
+		end
+		if a == 0 or b == 0 then
+			result = a > 0 and 1 or b > 0 and 2 or 0
+			break
+		end
+		local t = workspace:GetServerTimeNow()
+		if not collapseStart and t >= m.endsAt then
+			collapseStart = t
+			ring = makeRing(center)
+			phase(m, "Collapse", M.Collapse)
+		end
+		if collapseStart then
+			local k = math.min((t - collapseStart) / M.Collapse, 1)
+			local radius = m.arena.radius + (M.CollapseMinRadius - m.arena.radius) * k
+			ring.Size = Vector3.new(0.2, radius * 2, radius * 2)
+			for _, p in m.players do
+				local hum = byPlayer[p] == m and humOf(p)
+				local root = hum and p.Character:FindFirstChild("HumanoidRootPart")
+				if root and ((root.Position - center) * Vector3.new(1, 0, 1)).Magnitude > radius then
+					Combat.applyDamage(nil, p.Character, hum, p, M.CollapseDps * 0.1, "Collapse", {})
+				end
+			end
+			if k >= 1 then
+				result = hpA > hpB and 1 or hpB > hpA and 2 or 0
+				break
+			end
+		end
+		task.wait(0.1)
+	end
+	if ring then
+		ring:Destroy()
+	end
+	return result or 0
+end
+
+local function roundEnd(m, winner: number)
+	if winner > 0 then
+		m.score[winner] += 1
+		local countered = m.lastWinner == 3 - winner
+		for _, p in m.teams[winner] do
+			if m.stats[p] and byPlayer[p] == m then
+				m.stats[p].roundsWon += 1
+				local hum = humOf(p)
+				if hum and hum.Health >= hum.MaxHealth then
+					banner(m, p, "FLAWLESS")
+				end
+				if hum and m.clutch[p] then
+					banner(m, p, "CLUTCH 1v2")
+				end
+				if countered then
+					banner(m, p, "COUNTERED")
+				end
+			end
+		end
+		m.lastWinner = winner
+	else
+		m.lastWinner = nil -- draw: blind picks again
+	end
+	m.roundWinner = winner
+	phase(m, "RoundEnd", M.RoundEnd)
+	waitFor(m, M.RoundEnd)
+end
+
+local function updateElo(m, winner: number)
+	local function avg(team)
+		local s = 0
+		for _, p in team do
+			s += elo(p)
+		end
+		return s / #team
+	end
+	local expected = 1 / (1 + 10 ^ ((avg(m.teams[2]) - avg(m.teams[1])) / 400))
+	local delta = M.EloK * ((winner == 1 and 1 or 0) - expected)
+	for t, team in m.teams do
+		for _, p in team do
+			local d = Data.get(p)
+			if d then
+				d.elo = math.floor(d.elo + (t == 1 and delta or -delta) + 0.5)
+			end
+		end
+	end
+end
+
+local function finish(m)
+	local winner = m.forfeit
+		or (m.score[1] >= m.cfg.winsNeeded and 1)
+		or (m.score[2] >= m.cfg.winsNeeded and 2)
+		or 0
+	if not m.private and winner > 0 then
+		updateElo(m, winner)
+	end
+	local group = { mode = m.mode, teams = m.teams, votes = {}, expires = os.clock() + M.ResultsTime }
+	for _, p in m.players do
+		local wasHere = byPlayer[p] == m
+		byPlayer[p] = nil
+		if wasHere and p.Parent and Data.get(p) then
+			local st = m.stats[p]
+			local team = p:GetAttribute("Team")
+			local won = team == winner
+			local lines = Data.reward(p, won, st.roundsWon > 0 or st.damage >= Config.Rewards.MinDamage, st.banners)
+			Data.push(p)
+			p:SetAttribute("MatchId", 0)
+			p:SetAttribute("Team", 0)
+			rematch[p] = group
+			Net.Event:FireClient(p, "Results", { won = won, lines = lines, score = m.score, team = team, private = m.private })
+			task.spawn(p.LoadCharacter, p)
+		end
+	end
+	m.arena.busy = false
+end
+
+local function run(m)
+	while not m.over do
+		m.round += 1
+		pickPhase(m)
+		if m.over then
+			break
+		end
+		spawnAll(m)
+		phase(m, "Countdown", M.Countdown)
+		waitFor(m, M.Countdown)
+		if m.over then
+			break
+		end
+		local winner = live(m)
+		if m.over then
+			break
+		end
+		roundEnd(m, winner)
+		if m.score[1] >= m.cfg.winsNeeded or m.score[2] >= m.cfg.winsNeeded then
+			break
+		end
+	end
+	finish(m)
+end
+
+local function start(mode: string, teams, private: boolean): boolean
+	local arena = freeArena(mode)
+	if not arena then
+		return false
+	end
+	arena.busy = true
+	nextId += 1
+	local m = {
+		id = nextId,
+		mode = mode,
+		cfg = Config.Modes[mode],
+		arena = arena,
+		teams = teams,
+		players = {},
+		score = { 0, 0 },
+		round = 0,
+		private = private,
+		picking = {},
+		ready = {},
+		stats = {},
+		clutch = {},
+		phase = "Pick",
+	}
+	for t, team in teams do
+		for _, p in team do
+			Match.leaveQueue(p)
+			challenges[p] = nil
+			rematch[p] = nil
+			byPlayer[p] = m
+			table.insert(m.players, p)
+			m.stats[p] = { damage = 0, roundsWon = 0, banners = 0, roundKills = 0 }
+			p:SetAttribute("MatchId", m.id)
+			p:SetAttribute("Team", t)
+		end
+	end
+	task.spawn(run, m)
+	return true
+end
+
+---------------------------------------------------------------- matchmaking
+
+local function tryDuel()
+	local q = queues.Duel
+	for i = 1, #q do
+		for j = i + 1, #q do
+			local a, b = q[i], q[j]
+			local waited = os.clock() - math.min(a.t, b.t)
+			local window = M.EloWindow * (1 + waited // M.EloWindowEvery)
+			if math.abs(elo(a.player) - elo(b.player)) <= window then
+				return { { a.player }, { b.player } }
+			end
+		end
+	end
+	return nil
+end
+
+local function tryDoubles()
+	local q = queues.Doubles
+	if #q < 4 then
+		return nil
+	end
+	local four = { q[1].player, q[2].player, q[3].player, q[4].player }
+	table.sort(four, function(x, y)
+		return elo(x) > elo(y)
+	end)
+	return { { four[1], four[4] }, { four[2], four[3] } }
+end
+
+---------------------------------------------------------------- social
+
+function Match.challenge(player: Player, target: Player)
+	if target == player or byPlayer[player] or byPlayer[target] then
+		return
+	end
+	challenges[target] = challenges[target] or {}
+	challenges[target][player] = os.clock()
+	Net.Event:FireClient(target, "Challenged", player)
+	Net.Event:FireClient(player, "Notify", "Challenge sent to " .. target.DisplayName)
+end
+
+function Match.challengeReply(player: Player, from: any, accept: any)
+	local list = challenges[player]
+	local sentAt = list and typeof(from) == "Instance" and list[from]
+	if not sentAt then
+		return
+	end
+	list[from] = nil
+	if not from.Parent then
+		return
+	end
+	if accept ~= true then
+		Net.Event:FireClient(from, "Notify", player.DisplayName .. " declined your challenge")
+	elseif os.clock() - sentAt < 20 and not byPlayer[player] and not byPlayer[from] then
+		if not start("Duel", { { from }, { player } }, true) then
+			send({ player, from }, "Notify", "All arenas are busy, try again in a moment")
+		end
+	end
+end
+
+function Match.rematch(player: Player)
+	local g = rematch[player]
+	if not g or os.clock() > g.expires or byPlayer[player] then
+		return
+	end
+	g.votes[player] = true
+	local everyone = {}
+	for _, team in g.teams do
+		for _, p in team do
+			table.insert(everyone, p)
+		end
+	end
+	for _, p in everyone do
+		if not g.votes[p] or not p.Parent or byPlayer[p] then
+			send(everyone, "Notify", player.DisplayName .. " wants a rematch")
+			return
+		end
+	end
+	for _, p in everyone do
+		rematch[p] = nil
+	end
+	start(g.mode, g.teams, true)
+end
+
+function Match.onLeave(player: Player)
+	Match.leaveQueue(player)
+	challenges[player] = nil
+	rematch[player] = nil
+	local m = byPlayer[player]
+	if not m then
+		return
+	end
+	byPlayer[player] = nil
+	local team = player:GetAttribute("Team")
+	for _, p in m.teams[team] do
+		if p ~= player and byPlayer[p] == m then
+			return
+		end
+	end
+	m.forfeit = 3 - team
+	m.over = true
+end
+
+function Match.start(worldArenas)
+	arenas = worldArenas
+
+	Combat.canDamage = function(a, v)
+		local m = byPlayer[a]
+		return m ~= nil and m == byPlayer[v] and (m.phase == "Live" or m.phase == "Collapse")
+			and a:GetAttribute("Team") ~= v:GetAttribute("Team")
+	end
+	Combat.audience = function(p)
+		local m = byPlayer[p]
+		if m then
+			return m.players
+		end
+		local list = {}
+		for _, o in Players:GetPlayers() do
+			if not byPlayer[o] then
+				table.insert(list, o)
+			end
+		end
+		return list
+	end
+	Combat.onDamage = function(a, _v, amount)
+		local m = byPlayer[a]
+		if m and m.stats[a] then
+			m.stats[a].damage += amount
+		end
+	end
+	Combat.onKill = function(a, v, weaponId, info)
+		local m = byPlayer[v]
+		if not m then
+			return
+		end
+		local root = v.Character and v.Character:FindFirstChild("HumanoidRootPart")
+		send(m.players, "Feed", {
+			killer = a and a.DisplayName or "Collapse",
+			killerTeam = a and a:GetAttribute("Team") or 0,
+			victim = v.DisplayName,
+			victimTeam = v:GetAttribute("Team"),
+			weapon = weaponId,
+			head = info and info.head == true,
+			pos = root and root.Position,
+		})
+		if a and a ~= v and m.stats[a] then
+			local st = m.stats[a]
+			st.roundKills += 1
+			if weaponId == "Meridian" and not info.scoped then
+				banner(m, a, "NO-SCOPE")
+			end
+			if m.mode == "Doubles" and st.roundKills == 2 then
+				banner(m, a, "DOUBLE")
+			end
+		end
+	end
+
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for mode, try in { Duel = tryDuel, Doubles = tryDoubles } do
+				local teams = freeArena(mode) and try()
+				if teams then
+					start(mode, teams, false)
+				end
+			end
+		end
+	end)
+end
+
+return Match
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">World</string>
+          <string name="Source"><![CDATA[-- Builds the lobby (with firing range) and 4 arenas from code, so the place needs no manual building.
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local C = Config.Colors
+local GRAY = Color3.fromRGB(120, 122, 128)
+
+-- Half-arena layouts (x < 0). Boxes are mirrored across x = 0; boxes with x == 0 are center pieces.
+-- {x, z, sizeX, sizeY, sizeZ, baseY?}
+local LAYOUTS = {
+	{
+		name = "Fulcrum",
+		size = { 90, 60 },
+		spawnX = 40,
+		boxes = {
+			{ -34, 0, 1, 6, 10 }, -- spawn shield
+			{ -22, -22, 4, 3, 4 }, -- long lane
+			{ -9, -25, 3, 4, 6 },
+			{ -18, -13, 24, 10, 1 }, -- long/mid divider
+			{ 0, 0, 16, 3, 10 }, -- central bridge
+			{ -14, 4, 4, 4, 4 }, -- mid lane
+			{ -26, -5, 3, 5, 3 },
+			{ -18, 13, 28, 10, 1 }, -- mid/close divider
+			{ -30, 20, 2, 10, 8 }, -- close-quarters lane
+			{ -21, 25, 8, 10, 2 },
+			{ -12, 18, 2, 10, 8 },
+			{ -5, 26, 6, 10, 2 },
+			{ 0, 20, 2, 10, 6 },
+		},
+	},
+	{
+		name = "Mirrorline",
+		size = { 120, 90 },
+		spawnX = 55,
+		boxes = {
+			{ -48, 0, 1, 6, 12 }, -- spawn shield
+			{ -40, -20, 2, 12, 2 },
+			{ -40, 20, 2, 12, 2 },
+			{ -25, 0, 2, 12, 2 },
+			{ -12, -30, 2, 12, 2 },
+			{ -12, 30, 2, 12, 2 },
+			{ -30, -32, 14, 3, 14 }, -- stepped platforms
+			{ -33, -35, 6, 6, 6 },
+			{ -30, 32, 14, 3, 14 },
+			{ -33, 35, 6, 6, 6 },
+			{ -20, -15, 1, 8, 14 },
+			{ -20, 15, 1, 8, 14 },
+			{ -8, -12, 4, 4, 4 },
+			{ -8, 12, 4, 4, 4 },
+			{ 0, 0, 10, 3, 30 }, -- center platform + pillar
+			{ 0, 0, 4, 8, 4 },
+			{ 0, -38, 6, 4, 6 },
+			{ 0, 38, 6, 4, 6 },
+		},
+	},
+}
+
+local World = {}
+World.arenas = {}
+
+local board: TextLabel
+
+local function block(parent: Instance, size: Vector3, cf: CFrame, color: Color3, name: string?): Part
+	local p = Instance.new("Part")
+	p.Name = name or "Block"
+	p.Anchored = true
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+local function walls(parent: Instance, origin: Vector3, sx: number, sz: number, height: number)
+	block(parent, Vector3.new(sx + 2, height, 1), CFrame.new(origin + Vector3.new(0, height / 2, sz / 2 + 0.5)), GRAY)
+	block(parent, Vector3.new(sx + 2, height, 1), CFrame.new(origin + Vector3.new(0, height / 2, -sz / 2 - 0.5)), GRAY)
+	block(parent, Vector3.new(1, height, sz), CFrame.new(origin + Vector3.new(sx / 2 + 0.5, height / 2, 0)), GRAY)
+	block(parent, Vector3.new(1, height, sz), CFrame.new(origin + Vector3.new(-sx / 2 - 0.5, height / 2, 0)), GRAY)
+end
+
+local function sign(parent: Instance, cf: CFrame, size: Vector2, text: string, textSize: number): TextLabel
+	local part = block(parent, Vector3.new(size.X, size.Y, 0.5), cf, C.Dark, "Sign")
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.PixelsPerStud = 25
+	gui.Parent = part
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = C.Light
+	label.Font = Enum.Font.GothamBlack
+	label.TextSize = textSize
+	label.TextWrapped = true
+	label.Text = text
+	label.Parent = gui
+	return label
+end
+
+local function dummy(parent: Instance, pos: Vector3)
+	local m = Instance.new("Model")
+	m.Name = "Dummy"
+	local function limb(name, size, offset, color)
+		local p = block(m, size, CFrame.new(pos + offset), color, name)
+		return p
+	end
+	local root = limb("HumanoidRootPart", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0), C.Dark)
+	root.CFrame = CFrame.lookAt(root.Position, root.Position + Vector3.new(0, 0, 1)) -- faces the firing line
+	root.Transparency = 1
+	root.CanQuery = false
+	root.CanCollide = false
+	limb("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0), C.Enemy)
+	limb("Head", Vector3.new(2, 1, 1), Vector3.new(0, 4.5, 0), C.Light)
+	limb("Left Arm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0), C.Dark)
+	limb("Right Arm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0), C.Dark)
+	limb("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0), C.Dark)
+	limb("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0), C.Dark)
+	local hum = Instance.new("Humanoid")
+	hum.Parent = m
+	m.PrimaryPart = root
+	m:SetAttribute("Dummy", true)
+	m.Parent = parent
+end
+
+local function buildLobby(map: Folder)
+	local lobby = Instance.new("Model")
+	lobby.Name = "Lobby"
+	block(lobby, Vector3.new(120, 1, 200), CFrame.new(0, -0.5, 0), C.Light, "Floor")
+	block(lobby, Vector3.new(30, 0.05, 150), CFrame.new(0, 0.025, -15), C.Dark, "RangeLane")
+	block(lobby, Vector3.new(30, 0.05, 0.6), CFrame.new(0, 0.05, 60), C.Gold, "FiringLine")
+	walls(lobby, Vector3.zero, 120, 200, 24)
+
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Anchored = true
+	spawn.Size = Vector3.new(8, 1, 8)
+	spawn.CFrame = CFrame.lookAt(Vector3.new(0, 0.5, 80), Vector3.new(0, 0.5, 0))
+	spawn.Color = C.Ally
+	spawn.Material = Enum.Material.SmoothPlastic
+	spawn.Duration = 0
+	spawn.Neutral = true
+	spawn.Parent = lobby
+
+	local x = -59.5
+	sign(lobby, CFrame.lookAt(Vector3.new(x, 12, 50), Vector3.new(0, 12, 50)), Vector2.new(40, 10),
+		"ANTITHESIS\nEvery loadout has an answer.", 80)
+	sign(lobby, CFrame.lookAt(Vector3.new(x, 12, 0), Vector3.new(0, 12, 0)), Vector2.new(40, 12),
+		"[M] or the MENU button: queue Duel / Doubles, open the Shop\nWalk up to a player to CHALLENGE them\nShoot the dummies to warm up", 45)
+	board = sign(lobby, CFrame.lookAt(Vector3.new(-x, 12, 30), Vector3.new(0, 12, 30)), Vector2.new(30, 20), "WEEKLY WINS\n...", 40)
+
+	local dummies = Instance.new("Folder")
+	dummies.Name = "Dummies"
+	dummies.Parent = workspace
+	for i, d in { 20, 40, 70, 110, 150 } do
+		dummy(dummies, Vector3.new(({ -10, 8, -4, 10, 0 })[i], 0, 60 - d))
+	end
+	lobby.Parent = map
+end
+
+local function buildArena(map: Folder, index: number, layout)
+	local origin = Vector3.new(500 * index, 0, 0)
+	local model = Instance.new("Model")
+	model.Name = "Arena" .. index
+	local sx, sz = layout.size[1], layout.size[2]
+	block(model, Vector3.new(sx / 2, 1, sz), CFrame.new(origin + Vector3.new(-sx / 4, -0.5, 0)), C.Light, "Floor")
+	block(model, Vector3.new(sx / 2, 1, sz), CFrame.new(origin + Vector3.new(sx / 4, -0.5, 0)), C.Dark, "Floor")
+	block(model, Vector3.new(0.4, 0.05, sz), CFrame.new(origin + Vector3.new(0, 0.025, 0)), C.Gold, "CenterLine")
+	walls(model, origin, sx, sz, 20)
+
+	for _, b in layout.boxes do
+		local size = Vector3.new(b[3], b[4], b[5])
+		local y = (b[6] or 0) + b[4] / 2
+		if b[1] == 0 then
+			block(model, size, CFrame.new(origin + Vector3.new(0, y, b[2])), GRAY)
+		else
+			block(model, size, CFrame.new(origin + Vector3.new(b[1], y, b[2])), C.Dark)
+			block(model, size, CFrame.new(origin + Vector3.new(-b[1], y, b[2])), C.Light)
+		end
+	end
+
+	local function spawnAt(x: number, z: number): CFrame
+		local pos = origin + Vector3.new(x, 3, z)
+		return CFrame.lookAt(pos, pos + Vector3.new(-math.sign(x), 0, 0))
+	end
+	local s = layout.spawnX
+	table.insert(World.arenas, {
+		index = index,
+		name = layout.name,
+		origin = origin,
+		radius = math.sqrt((sx / 2) ^ 2 + (sz / 2) ^ 2),
+		spawns = {
+			{ spawnAt(-s, -4), spawnAt(-s, 4) },
+			{ spawnAt(s, -4), spawnAt(s, 4) },
+		},
+		busy = false,
+	})
+	model.Parent = map
+end
+
+function World.build()
+	for _, child in workspace:GetChildren() do
+		if child.Name == "Baseplate" or child:IsA("SpawnLocation") then
+			child:Destroy()
+		end
+	end
+	Lighting.ClockTime = 14
+	Lighting.Brightness = 2
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 160)
+
+	local map = Instance.new("Folder")
+	map.Name = "Map"
+	map.Parent = workspace
+	buildLobby(map)
+	for i = 1, 4 do
+		buildArena(map, i, LAYOUTS[(i - 1) % #LAYOUTS + 1])
+	end
+end
+
+function World.setBoard(lines: { string })
+	board.Text = "WEEKLY WINS\n" .. table.concat(lines, "\n")
+end
+
+return World
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="11">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+      <token name="GameSettingsAvatar">0</token>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="12">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="13">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[-- Client entry point: builds the UI and routes server messages.
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local Net = require(ReplicatedStorage.Shared.Net)
+local State = require(script.State)
+local UI = require(script.UI)
+local Hud = require(script.Hud)
+local Menus = require(script.Menus)
+local Movement = require(script.Movement)
+local Weapons = require(script.Weapons)
+
+local player = Players.LocalPlayer
+pcall(StarterGui.SetCoreGuiEnabled, StarterGui, Enum.CoreGuiType.Backpack, false)
+
+local gui = UI.new("ScreenGui", {
+	Name = "Antithesis",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Parent = player:WaitForChild("PlayerGui"),
+})
+Hud.init(gui)
+Menus.init(gui)
+Movement.init()
+Weapons.init()
+
+local function setPhase(ph)
+	State.phase = ph
+	Hud.phase(ph)
+	Menus.phase(ph)
+end
+
+local handlers = {
+	Profile = function(p)
+		State.profile = p
+		Menus.refresh()
+	end,
+	Phase = setPhase,
+	Reveal = Menus.reveal,
+	Results = Menus.results,
+	Queue = function(mode)
+		State.queue = mode
+		State.queuedAt = os.clock()
+		Menus.refresh()
+	end,
+	Hit = Hud.hit,
+	Damaged = Hud.damaged,
+	Feed = Hud.feed,
+	Banner = Hud.banner,
+	Flash = Hud.flash,
+	Notify = Menus.toast,
+	Challenged = Menus.challenged,
+}
+
+Net.Event.OnClientEvent:Connect(function(action, ...)
+	local handler = handlers[action]
+	if handler then
+		handler(...)
+	end
+end)
+Net.FX.OnClientEvent:Connect(function(kind, a, b)
+	if kind == "Tracer" then
+		Hud.tracer(a, b)
+	end
+end)
+
+-- Hide my own challenge prompt; only other players should see it.
+local function hideOwnPrompt(char: Model)
+	local prompt = char:WaitForChild("HumanoidRootPart"):WaitForChild("ProximityPrompt", 10)
+	if prompt then
+		prompt.Enabled = false
+	end
+end
+player.CharacterAdded:Connect(hideOwnPrompt)
+if player.Character then
+	task.spawn(hideOwnPrompt, player.Character)
+end
+
+player:GetAttributeChangedSignal("MatchId"):Connect(function()
+	if player:GetAttribute("MatchId") == 0 then
+		setPhase(nil)
+	end
+end)
+
+Net.Event:FireServer("Hello")
+]]></string>
+        </Properties>
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">Hud</string>
+            <string name="Source"><![CDATA[-- In-match HUD and feedback: crosshair, hit markers, HP/ammo, score/timer, killfeed, banners, flash, tracers, enemy outlines.
+-- Everything important sits in the center column so 9:16 crops of recordings keep it (Shorts-safe HUD).
+local Debris = game:GetService("Debris")
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Config = require(ReplicatedStorage.Shared.Config)
+local State = require(script.Parent.State)
+local UI = require(script.Parent.UI)
+
+local Hud = {}
+local C = Config.Colors
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local root: Frame
+local crosshair, marker, dmgNumber, hpBar, hpText, ammoText, utilText, dashText
+local scoreText, timerText, phaseText, bigText, feed, bannerText, flashFrame, scope
+local edges = {}
+local correction: ColorCorrectionEffect
+local killsThisRound = 0
+local dmgAccum, dmgAt = 0, 0
+
+local function myTeam(): number
+	return player:GetAttribute("Team") or 0
+end
+
+function Hud.init(gui: ScreenGui)
+	root = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = gui })
+
+	crosshair = UI.new("Frame", { Size = UDim2.fromOffset(24, 24), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1, Parent = root })
+	for _, cfg in { { 2, 7, 0.5, 0 }, { 2, 7, 0.5, 1 }, { 7, 2, 0, 0.5 }, { 7, 2, 1, 0.5 } } do
+		UI.new("Frame", { Size = UDim2.fromOffset(cfg[1], cfg[2]), AnchorPoint = Vector2.new(cfg[3], cfg[4]), Position = UDim2.fromScale(cfg[3], cfg[4]), BackgroundColor3 = C.Light, BorderSizePixel = 0, Parent = crosshair })
+	end
+
+	marker = UI.new("Frame", { Size = UDim2.fromOffset(22, 22), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1, Visible = false, Parent = root })
+	for _, rot in { 45, -45 } do
+		UI.new("Frame", { Size = UDim2.new(1, 0, 0, 3), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Rotation = rot, BorderSizePixel = 0, BackgroundColor3 = C.Light, Parent = marker })
+	end
+	dmgNumber = UI.label({ Position = UDim2.new(0.5, 30, 0.5, -40), Size = UDim2.fromOffset(80, 24), TextXAlignment = Enum.TextXAlignment.Left, TextSize = 20, Visible = false, Parent = root })
+
+	-- Bottom center: HP, ammo, utility, dash
+	local bottom = UI.new("Frame", { Size = UDim2.fromOffset(420, 70), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -16), BackgroundTransparency = 1, Parent = root })
+	local hpBack = UI.new("Frame", { Size = UDim2.fromOffset(200, 14), Position = UDim2.fromOffset(0, 40), BackgroundColor3 = C.Dark, BorderSizePixel = 0, Parent = bottom })
+	hpBar = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Ally, BorderSizePixel = 0, Parent = hpBack })
+	hpText = UI.label({ Position = UDim2.fromOffset(0, 8), Size = UDim2.fromOffset(200, 30), TextSize = 28, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = bottom })
+	ammoText = UI.label({ Position = UDim2.fromOffset(220, 8), Size = UDim2.fromOffset(200, 30), TextSize = 28, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Right, Parent = bottom })
+	utilText = UI.label({ Position = UDim2.fromOffset(220, 40), Size = UDim2.fromOffset(200, 18), TextSize = 14, TextXAlignment = Enum.TextXAlignment.Right, Parent = bottom })
+	dashText = UI.label({ Position = UDim2.fromOffset(0, 56), Size = UDim2.fromOffset(200, 16), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = bottom })
+
+	-- Top center: score, timer, phase
+	scoreText = UI.label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 44), Size = UDim2.fromOffset(300, 36), TextSize = 32, Font = Enum.Font.GothamBlack, RichText = true, Visible = false, Parent = root })
+	timerText = UI.label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 80), Size = UDim2.fromOffset(300, 22), TextSize = 20, Visible = false, Parent = root })
+	phaseText = UI.label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 102), Size = UDim2.fromOffset(400, 20), TextSize = 14, TextColor3 = C.Gold, Visible = false, Parent = root })
+	feed = UI.new("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 126), Size = UDim2.fromOffset(420, 100), BackgroundTransparency = 1, Parent = root }, {
+		UI.new("UIListLayout", { HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+	bigText = UI.label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.35), Size = UDim2.fromOffset(600, 80), TextSize = 64, Font = Enum.Font.GothamBlack, TextStrokeTransparency = 0.5, Visible = false, Parent = root })
+	bannerText = UI.label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromOffset(500, 50), TextSize = 40, Font = Enum.Font.GothamBlack, TextColor3 = C.Gold, TextStrokeTransparency = 0.4, Visible = false, Parent = root })
+
+	-- Directional damage edges (left, right, top=front, bottom=behind)
+	for name, cfg in { Left = { 0, 0, 0.012, 1 }, Right = { 0.988, 0, 0.012, 1 }, Front = { 0, 0, 1, 0.02 }, Back = { 0, 0.98, 1, 0.02 } } do
+		edges[name] = UI.new("Frame", { Position = UDim2.fromScale(cfg[1], cfg[2]), Size = UDim2.fromScale(cfg[3], cfg[4]), BackgroundColor3 = C.Bad, BorderSizePixel = 0, BackgroundTransparency = 1, Parent = root })
+	end
+
+	scope = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = root }, {
+		UI.new("Frame", { Size = UDim2.new(0.5, -260, 1, 0), BackgroundColor3 = Color3.new(), BorderSizePixel = 0 }),
+		UI.new("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), Size = UDim2.new(0.5, -260, 1, 0), BackgroundColor3 = Color3.new(), BorderSizePixel = 0 }),
+		UI.new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 520, 0, 1), BackgroundColor3 = Color3.new(), BorderSizePixel = 0 }),
+		UI.new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 1, 1, 0), BackgroundColor3 = Color3.new(), BorderSizePixel = 0 }),
+	})
+	flashFrame = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 10, Parent = root })
+
+	correction = Instance.new("ColorCorrectionEffect")
+	correction.Parent = Lighting
+
+	RunService.RenderStepped:Connect(Hud.update)
+	task.spawn(function()
+		while true do
+			Hud.outlines()
+			task.wait(0.5)
+		end
+	end)
+end
+
+function Hud.update()
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local hp = hum and math.ceil(hum.Health) or 0
+	hpText.Text = tostring(hp)
+	hpBar.Size = UDim2.fromScale(math.clamp(hp / 100, 0, 1), 1)
+	hpBar.BackgroundColor3 = hp < 30 and C.Bad or C.Ally
+	correction.Saturation = (hum and hp < 30 and hp > 0) and -0.4 or 0
+
+	local w = Config.Weapons[State.weaponId or ""]
+	ammoText.Text = (w and w.mag) and (State.reloading and "RELOADING" or (State.ammo .. " / " .. State.mag)) or (w and string.upper(State.weaponId) or "")
+	local util = player:GetAttribute("Utility")
+	utilText.Text = (util and string.upper(util) .. "  x" .. (player:GetAttribute("Charges") or 0) or "") .. "   [G]"
+	local dashLeft = State.dashReadyAt - os.clock()
+	dashText.Text = dashLeft > 0 and string.format("DASH %.1fs", dashLeft) or "DASH READY [SHIFT]"
+
+	crosshair.Visible = not State.scoped and not State.menuOpen
+	scope.Visible = State.scoped
+	if os.clock() - dmgAt > 0.6 then
+		dmgNumber.Visible = false
+		dmgAccum = 0
+	end
+
+	local ph = State.phase
+	if ph then
+		local left = math.ceil(math.max(0, ph.endsAt - workspace:GetServerTimeNow()))
+		timerText.Text = string.format("ROUND %d   %d:%02d", ph.round, left // 60, left % 60)
+		if ph.phase == "Countdown" then
+			bigText.Visible = true
+			bigText.TextColor3 = C.Light
+			bigText.Text = tostring(left)
+		end
+	end
+end
+
+function Hud.phase(ph)
+	local inMatch = ph ~= nil
+	scoreText.Visible = inMatch
+	timerText.Visible = inMatch
+	phaseText.Visible = inMatch
+	bigText.Visible = false
+	if not ph then
+		return
+	end
+	local me, them = ph.team, 3 - ph.team
+	scoreText.Text = string.format('<font color="#%s">%d</font>  -  <font color="#%s">%d</font>', C.Ally:ToHex(), ph.score[me], C.Enemy:ToHex(), ph.score[them])
+	phaseText.Text = ({
+		Pick = "PICK YOUR LOADOUT",
+		Thesis = "THESIS: ROUND WINNER LOCKS FIRST",
+		Antithesis = "ANTITHESIS: ROUND LOSER COUNTER-PICKS",
+		Countdown = "GET READY",
+		Live = "FIRST TO " .. ph.winsNeeded .. "  •  " .. string.upper(ph.arena),
+		Collapse = "COLLAPSE: GET TO THE CENTER",
+		RoundEnd = "",
+	})[ph.phase] or ""
+	if ph.phase == "Live" then
+		killsThisRound = 0
+	elseif ph.phase == "RoundEnd" then
+		bigText.Visible = true
+		local w = ph.roundWinner
+		bigText.Text = w == 0 and "DRAW" or w == me and "ROUND WON" or "ROUND LOST"
+		bigText.TextColor3 = w == 0 and C.Light or w == me and C.Ally or C.Enemy
+	end
+end
+
+function Hud.hit(damage: number, head: boolean, killed: boolean)
+	marker.Visible = true
+	marker.Size = UDim2.fromOffset(head and 30 or 22, head and 30 or 22)
+	for _, line in marker:GetChildren() do
+		line.BackgroundColor3 = killed and C.Bad or head and C.Gold or C.Light
+	end
+	task.delay(head and 0.16 or 0.12, function()
+		marker.Visible = false
+	end)
+	dmgAccum += damage
+	dmgAt = os.clock()
+	dmgNumber.Text = tostring(dmgAccum)
+	dmgNumber.TextColor3 = head and C.Gold or C.Light
+	dmgNumber.Visible = true
+	if killed then
+		killsThisRound += 1
+		UI.sound(Config.Sounds.Kill, 2 ^ (2 * math.min(killsThisRound - 1, 4) / 12), 0.6)
+		if head then
+			camera.FieldOfView += 2
+		end
+	else
+		UI.sound(head and Config.Sounds.Headshot or Config.Sounds.Hit, head and 1.4 or 1, 0.5)
+	end
+end
+
+function Hud.damaged(fromPos: Vector3?)
+	local edge = edges.Front
+	if fromPos then
+		local rel = camera.CFrame:PointToObjectSpace(fromPos)
+		if math.abs(rel.X) > math.abs(rel.Z) then
+			edge = rel.X > 0 and edges.Right or edges.Left
+		else
+			edge = rel.Z < 0 and edges.Front or edges.Back
+		end
+	end
+	edge.BackgroundTransparency = 0.2
+	TweenService:Create(edge, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+end
+
+local function shatter(pos: Vector3, color: Color3)
+	for _ = 1, 8 do
+		local p = Instance.new("Part")
+		p.Size = Vector3.one * (0.4 + math.random() * 0.5)
+		p.CFrame = CFrame.new(pos + Vector3.new(math.random() - 0.5, math.random() * 2, math.random() - 0.5) * 2)
+		p.Color = color
+		p.Material = Enum.Material.SmoothPlastic
+		p.CanQuery = false
+		p.CanTouch = false
+		p.AssemblyLinearVelocity = Vector3.new(math.random(-15, 15), math.random(10, 25), math.random(-15, 15))
+		p.Parent = workspace
+		Debris:AddItem(p, 1.5)
+	end
+end
+
+function Hud.feed(data)
+	local me = myTeam()
+	local killerColor = data.killerTeam == 0 and C.Gold or UI.relColor(data.killerTeam, me)
+	local entry = UI.label({
+		Size = UDim2.fromOffset(420, 22),
+		TextSize = 16,
+		RichText = true,
+		TextStrokeTransparency = 0.6,
+		Text = string.format('<font color="#%s">%s</font>  [%s%s]  <font color="#%s">%s</font>',
+			killerColor:ToHex(), data.killer, string.upper(data.weapon), data.head and " •HS" or "", UI.relColor(data.victimTeam, me):ToHex(), data.victim),
+		Parent = feed,
+	})
+	local entries = feed:GetChildren()
+	if #entries > 5 then -- layout + 4 entries
+		for _, e in entries do
+			if e:IsA("TextLabel") and e ~= entry then
+				e:Destroy()
+				break
+			end
+		end
+	end
+	Debris:AddItem(entry, 5)
+	if data.pos then
+		shatter(data.pos, UI.relColor(data.victimTeam, me))
+	end
+end
+
+function Hud.banner(text: string)
+	bannerText.Text = text
+	bannerText.Visible = true
+	bannerText.TextSize = 60
+	TweenService:Create(bannerText, TweenInfo.new(0.2), { TextSize = 40 }):Play()
+	task.delay(1.5, function()
+		if bannerText.Text == text then
+			bannerText.Visible = false
+		end
+	end)
+end
+
+function Hud.flash(duration: number)
+	flashFrame.BackgroundTransparency = 0
+	TweenService:Create(flashFrame, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
+end
+
+function Hud.tracer(from: Vector3, to: Vector3)
+	local dist = (to - from).Magnitude
+	if dist < 1 then
+		return
+	end
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.Neon
+	p.Color = C.Gold
+	p.Size = Vector3.new(0.06, 0.06, dist)
+	p.CFrame = CFrame.lookAt(from, to) * CFrame.new(0, 0, -dist / 2)
+	p.Parent = camera
+	Debris:AddItem(p, 0.06)
+end
+
+-- Outline match players: allies cyan, enemies orange. Dark outfits can't hide anyone.
+function Hud.outlines()
+	local myMatch = player:GetAttribute("MatchId") or 0
+	for _, other in Players:GetPlayers() do
+		local char = other.Character
+		if other ~= player and char then
+			local h = char:FindFirstChild("TeamOutline")
+			if myMatch ~= 0 and other:GetAttribute("MatchId") == myMatch then
+				h = h or UI.new("Highlight", { Name = "TeamOutline", FillTransparency = 1, OutlineTransparency = 0.3, Parent = char })
+				h.OutlineColor = UI.relColor(other:GetAttribute("Team"), myTeam())
+			elseif h then
+				h:Destroy()
+			end
+		end
+	end
+end
+
+return Hud
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
+            <string name="Name">Menus</string>
+            <string name="Source"><![CDATA[-- Lobby menu, shop, Counter-Pick screen, reveal card, results, challenges, toasts.
+local ContextActionService = game:GetService("ContextActionService")
+local GuiService = game:GetService("GuiService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+local State = require(script.Parent.State)
+local UI = require(script.Parent.UI)
+
+local Menus = {}
+local C = Config.Colors
+local GREY = Color3.fromRGB(90, 92, 98)
+local player = Players.LocalPlayer
+
+local menuButton, lobbyPanel, lobbyCoins, duelButton, doublesButton, fovLabel
+local shopPanel, shopList, shopCoins
+local pickPanel, pickTitle, pickTimer, revealLabel, pickRows, readyButton
+local waitLabel, queuePill, revealCard, revealCardText, toastLabel
+local resultsPanel, resultsTitle, resultsScore, resultsLines, unlockBar, unlockText, requeueButton, rematchButton
+local challengePanel, challengeText
+local pickMode = "match"
+local requeueAt: number? = nil
+local challenger: Player? = nil
+
+local function focus(button: GuiObject)
+	if UserInputService.GamepadEnabled then
+		GuiService.SelectedObject = button
+	end
+end
+
+local function clear(frame: Instance)
+	for _, c in frame:GetChildren() do
+		if not c:IsA("UIListLayout") then
+			c:Destroy()
+		end
+	end
+end
+
+local function list(parent: Instance, padding: number)
+	return UI.new("UIListLayout", { Padding = UDim.new(0, padding), HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Parent = parent })
+end
+
+local function revealText(reveal): string
+	if not reveal then
+		return ""
+	end
+	local lines = {}
+	for _, e in reveal do
+		local l = e.loadout
+		table.insert(lines, string.format("THESIS  %s:  %s / %s / %s / %s", e.name, l.Primary, l.Secondary, l.Melee, l.Utility))
+	end
+	return table.concat(lines, "\n")
+end
+
+---------------------------------------------------------------- pick screen
+
+local function buildPick()
+	clear(pickRows)
+	local p = State.profile
+	if not p then
+		return
+	end
+	local ph = State.phase
+	local hints = {}
+	if pickMode == "match" and ph and ph.reveal then
+		for _, e in ph.reveal do
+			for _, id in Config.Counters[e.loadout.Primary] or {} do
+				hints[id] = true
+			end
+			for _, id in Config.Counters[e.loadout.Utility] or {} do
+				hints[id] = true
+			end
+		end
+	end
+	for order, slot in Config.Slots do
+		local row = UI.new("Frame", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, LayoutOrder = order, Parent = pickRows }, {
+			UI.new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), VerticalAlignment = Enum.VerticalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }),
+		})
+		UI.label({ Text = string.upper(slot), Size = UDim2.fromOffset(110, 56), TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = C.Gold, LayoutOrder = 0, Parent = row })
+		for i, id in Config.Order[slot] do
+			local w = Config.Weapons[id]
+			local owned = p.unlocked[id]
+			local selected = player:GetAttribute(slot) == id
+			local sub = hints[id] and "COUNTER" or owned and w.class or ("LOCKED - " .. w.price)
+			local b = UI.button(string.upper(id) .. "\n" .. sub, {
+				Size = UDim2.fromOffset(118, 56),
+				TextSize = 14,
+				TextWrapped = true,
+				LayoutOrder = i,
+				AutoButtonColor = owned == true,
+				BackgroundColor3 = selected and C.Ally or owned and C.Light or GREY,
+			}, function()
+				if owned then
+					Net.Event:FireServer("Pick", slot, id)
+				end
+			end)
+			if hints[id] then
+				UI.new("UIStroke", { Color = C.Good, Thickness = 3, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
+			end
+			b.Parent = row
+		end
+	end
+end
+
+local function openLoadout()
+	pickMode = "lobby"
+	lobbyPanel.Visible = false
+	pickTitle.Text = "LOADOUT (used in the firing range and as your default)"
+	revealLabel.Text = ""
+	readyButton.Text = "DONE"
+	pickPanel.Visible = true
+	buildPick()
+	focus(readyButton)
+end
+
+---------------------------------------------------------------- shop
+
+local function buildShop()
+	clear(shopList)
+	local p = State.profile
+	if not p then
+		return
+	end
+	shopCoins.Text = p.coins .. " COINS"
+	local order = 0
+	local function row(name: string, sub: string, status: string, buttonText: string?, enabled: boolean?, onClick: (() -> ())?)
+		order += 1
+		local r = UI.new("Frame", { Size = UDim2.new(1, -12, 0, 50), BackgroundColor3 = Color3.fromRGB(60, 62, 68), LayoutOrder = order, Parent = shopList }, { UI.new("UICorner") })
+		UI.label({ Text = name, Position = UDim2.fromOffset(12, 4), Size = UDim2.fromOffset(260, 24), TextXAlignment = Enum.TextXAlignment.Left, Parent = r })
+		UI.label({ Text = sub, Position = UDim2.fromOffset(12, 27), Size = UDim2.fromOffset(260, 18), TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13, TextColor3 = Color3.fromRGB(170, 170, 175), Parent = r })
+		UI.label({ Text = status, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -148, 0.5, 0), Size = UDim2.fromOffset(140, 24), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.Gold, Parent = r })
+		if buttonText then
+			UI.button(buttonText, {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -8, 0.5, 0),
+				Size = UDim2.fromOffset(130, 36),
+				TextSize = 15,
+				AutoButtonColor = enabled == true,
+				BackgroundColor3 = enabled and C.Light or GREY,
+				Parent = r,
+			}, function()
+				if enabled and onClick then
+					onClick()
+				end
+			end)
+		end
+	end
+	for _, slot in Config.Slots do
+		for _, id in Config.Order[slot] do
+			local w = Config.Weapons[id]
+			local sub = slot .. " - " .. w.class
+			if p.unlocked[id] then
+				row(string.upper(id), sub, "OWNED")
+			else
+				row(string.upper(id), sub, w.price .. " COINS", "UNLOCK", p.coins >= w.price, function()
+					Net.Event:FireServer("Unlock", id)
+				end)
+			end
+		end
+	end
+	for _, name in Config.PaletteOrder do
+		local pal = Config.Palettes[name]
+		local title = string.upper(name) .. " PALETTE"
+		if p.palettes[name] then
+			local equipped = p.palette == name
+			row(title, "Weapon skin", equipped and "EQUIPPED" or "OWNED", not equipped and "EQUIP" or nil, true, function()
+				Net.Event:FireServer("Palette", name)
+			end)
+		elseif pal.price then
+			row(title, "Weapon skin", pal.price .. " COINS", "BUY", p.coins >= pal.price, function()
+				Net.Event:FireServer("Unlock", name)
+			end)
+		elseif pal.gamePass and pal.gamePass ~= 0 then
+			row(title, "Weapon skin (Robux)", "GAME PASS", "BUY", true, function()
+				MarketplaceService:PromptGamePassPurchase(player, pal.gamePass)
+			end)
+		else
+			row(title, "Weapon skin (Robux)", "COMING SOON")
+		end
+	end
+end
+
+---------------------------------------------------------------- public
+
+function Menus.refresh()
+	local p = State.profile
+	if p then
+		lobbyCoins.Text = p.coins .. " COINS   •   " .. p.wins .. " WINS"
+		fovLabel.Text = "FOV " .. p.fov
+		if shopPanel.Visible then
+			buildShop()
+		end
+	end
+	duelButton.Text = State.queue == "Duel" and "CANCEL SEARCH" or Config.Modes.Duel.label
+	doublesButton.Text = State.queue == "Doubles" and "CANCEL SEARCH" or Config.Modes.Doubles.label
+end
+
+function Menus.phase(ph)
+	menuButton.Visible = ph == nil
+	waitLabel.Visible = false
+	if ph then
+		lobbyPanel.Visible = false
+		shopPanel.Visible = false
+		resultsPanel.Visible = false
+		requeueAt = nil
+	end
+	local picking = ph and (ph.phase == "Pick" or ph.phase == "Thesis" or ph.phase == "Antithesis")
+	if picking and ph.canPick then
+		pickMode = "match"
+		pickTitle.Text = ({
+			Pick = "PICK YOUR LOADOUT",
+			Thesis = "YOU WON THE ROUND: LOCK YOUR THESIS (they will see it)",
+			Antithesis = "THEY LOCKED IN: PICK YOUR ANTITHESIS",
+		})[ph.phase]
+		revealLabel.Text = revealText(ph.reveal)
+		readyButton.Text = "READY"
+		pickPanel.Visible = true
+		buildPick()
+		focus(readyButton)
+	elseif pickMode == "match" or ph then
+		pickPanel.Visible = false
+		if picking then
+			waitLabel.Visible = true
+			waitLabel.Text = ph.phase == "Thesis" and "Opponent is locking their Thesis..." or "Opponent is picking their Antithesis..."
+		end
+	end
+end
+
+function Menus.reveal(reveal)
+	revealCardText.Text = revealText(reveal)
+	revealCard.Visible = true
+	revealCard.Size = UDim2.fromOffset(820, 240)
+	TweenService:Create(revealCard, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Size = UDim2.fromOffset(640, 170) }):Play()
+	UI.sound(Config.Sounds.Lock, 0.8, 0.8)
+	task.delay(1.4, function()
+		revealCard.Visible = false
+	end)
+end
+
+function Menus.results(data)
+	local p = State.profile
+	resultsTitle.Text = data.won and "VICTORY" or "DEFEAT"
+	resultsTitle.TextColor3 = data.won and C.Ally or C.Enemy
+	resultsScore.Text = data.score[data.team] .. "  -  " .. data.score[3 - data.team]
+	local lines, total = {}, 0
+	for _, l in data.lines do
+		table.insert(lines, "+" .. l[2] .. "   " .. l[1])
+		total += l[2]
+	end
+	resultsLines.Text = #lines > 0 and table.concat(lines, "\n") .. "\n= +" .. total .. " COINS" or "No coins this time (deal 100 damage or win a round)"
+
+	-- Progress toward the cheapest locked weapon.
+	local nextId, nextPrice
+	for id, w in Config.Weapons do
+		if p and not p.unlocked[id] and (not nextPrice or w.price < nextPrice) then
+			nextId, nextPrice = id, w.price
+		end
+	end
+	if nextId then
+		unlockText.Text = string.format("%d / %d COINS  ->  %s", math.min(p.coins, nextPrice), nextPrice, string.upper(nextId))
+		unlockBar.Size = UDim2.fromScale(math.clamp(p.coins / nextPrice, 0, 1), 1)
+	else
+		unlockText.Text = "ALL WEAPONS UNLOCKED: spend coins on palettes in the Shop"
+		unlockBar.Size = UDim2.fromScale(1, 1)
+	end
+
+	rematchButton.Text = "REMATCH"
+	requeueAt = (not data.private and State.lastMode) and os.clock() + 5 or nil
+	requeueButton.Visible = State.lastMode ~= nil
+	resultsPanel.Visible = true
+	focus(rematchButton)
+end
+
+function Menus.challenged(from: Player)
+	challenger = from
+	challengeText.Text = from.DisplayName .. " challenges you to a Duel"
+	challengePanel.Visible = true
+	task.delay(15, function()
+		if challenger == from then
+			challengePanel.Visible = false
+			challenger = nil
+		end
+	end)
+end
+
+function Menus.toast(text: string)
+	toastLabel.Text = text
+	toastLabel.Visible = true
+	task.delay(3, function()
+		if toastLabel.Text == text then
+			toastLabel.Visible = false
+		end
+	end)
+end
+
+local function toggleLobby()
+	if State.phase then
+		return
+	end
+	local open = lobbyPanel.Visible or shopPanel.Visible or pickPanel.Visible
+	lobbyPanel.Visible = not open
+	shopPanel.Visible = false
+	pickPanel.Visible = false
+	if lobbyPanel.Visible then
+		focus(duelButton)
+	end
+end
+
+local function queue(mode: string)
+	if State.queue == mode then
+		Net.Event:FireServer("Cancel")
+	else
+		State.lastMode = mode
+		Net.Event:FireServer("Queue", mode)
+		lobbyPanel.Visible = false
+	end
+end
+
+function Menus.init(gui: ScreenGui)
+	menuButton = UI.button("MENU [M]", { Position = UDim2.new(0, 16, 0.3, 0), Size = UDim2.fromOffset(120, 40), TextSize = 16, Parent = gui }, toggleLobby)
+
+	-- Lobby
+	lobbyPanel = UI.panel({ Size = UDim2.fromOffset(420, 440), Parent = gui })
+	list(lobbyPanel, 10)
+	UI.new("UIPadding", { PaddingTop = UDim.new(0, 18), Parent = lobbyPanel })
+	UI.label({ Text = "ANTITHESIS", Size = UDim2.fromOffset(380, 44), TextSize = 40, Font = Enum.Font.GothamBlack, Parent = lobbyPanel })
+	lobbyCoins = UI.label({ Text = "", TextColor3 = C.Gold, Size = UDim2.fromOffset(380, 24), Parent = lobbyPanel })
+	duelButton = UI.button(Config.Modes.Duel.label, { BackgroundColor3 = C.Ally, Parent = lobbyPanel }, function()
+		queue("Duel")
+	end)
+	doublesButton = UI.button(Config.Modes.Doubles.label, { BackgroundColor3 = C.Ally, Parent = lobbyPanel }, function()
+		queue("Doubles")
+	end)
+	UI.button("LOADOUT", { Parent = lobbyPanel }, openLoadout)
+	UI.button("SHOP", { Parent = lobbyPanel }, function()
+		lobbyPanel.Visible = false
+		shopPanel.Visible = true
+		buildShop()
+	end)
+	local fovRow = UI.new("Frame", { Size = UDim2.fromOffset(220, 44), BackgroundTransparency = 1, Parent = lobbyPanel })
+	local function fov(delta: number)
+		local p = State.profile
+		if p then
+			p.fov = math.clamp(p.fov + delta, 70, 90)
+			fovLabel.Text = "FOV " .. p.fov
+			Net.Event:FireServer("Fov", p.fov)
+		end
+	end
+	UI.button("-", { Size = UDim2.fromOffset(44, 44), Parent = fovRow }, function()
+		fov(-5)
+	end)
+	fovLabel = UI.label({ Text = "FOV 70", Position = UDim2.fromOffset(44, 7), Size = UDim2.fromOffset(132, 30), Parent = fovRow })
+	UI.button("+", { Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(176, 0), Parent = fovRow }, function()
+		fov(5)
+	end)
+	UI.button("CLOSE", { BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = lobbyPanel }, toggleLobby)
+
+	-- Shop
+	shopPanel = UI.panel({ Size = UDim2.fromOffset(580, 500), Parent = gui })
+	UI.label({ Text = "SHOP", Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(200, 36), TextSize = 30, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = shopPanel })
+	shopCoins = UI.label({ Position = UDim2.fromOffset(220, 16), Size = UDim2.fromOffset(200, 30), TextColor3 = C.Gold, Parent = shopPanel })
+	UI.button("BACK", { Position = UDim2.new(1, -120, 0, 12), Size = UDim2.fromOffset(100, 36), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = shopPanel }, function()
+		shopPanel.Visible = false
+		lobbyPanel.Visible = true
+	end)
+	shopList = UI.new("ScrollingFrame", {
+		Position = UDim2.fromOffset(10, 60),
+		Size = UDim2.new(1, -20, 1, -70),
+		BackgroundTransparency = 1,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 6,
+		Parent = shopPanel,
+	})
+	list(shopList, 6)
+
+	-- Pick screen
+	pickPanel = UI.panel({ Size = UDim2.fromOffset(780, 470), Parent = gui })
+	pickTitle = UI.label({ Position = UDim2.fromOffset(20, 12), Size = UDim2.new(1, -160, 0, 30), TextSize = 22, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = pickPanel })
+	pickTimer = UI.label({ Position = UDim2.new(1, -130, 0, 12), Size = UDim2.fromOffset(110, 30), TextSize = 26, Font = Enum.Font.GothamBlack, TextColor3 = C.Gold, TextXAlignment = Enum.TextXAlignment.Right, Parent = pickPanel })
+	revealLabel = UI.label({ Position = UDim2.fromOffset(20, 46), Size = UDim2.new(1, -40, 0, 36), TextSize = 15, TextColor3 = C.Enemy, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, Parent = pickPanel })
+	pickRows = UI.new("Frame", { Position = UDim2.fromOffset(20, 86), Size = UDim2.new(1, -40, 0, 270), BackgroundTransparency = 1, Parent = pickPanel })
+	list(pickRows, 6)
+	readyButton = UI.button("READY", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -16), BackgroundColor3 = C.Ally, Parent = pickPanel }, function()
+		pickPanel.Visible = false
+		if pickMode == "match" then
+			Net.Event:FireServer("Ready")
+			waitLabel.Text = "Ready. Waiting for the other side..."
+			waitLabel.Visible = true
+		else
+			lobbyPanel.Visible = true
+		end
+	end)
+	for _, slot in Config.Slots do
+		player:GetAttributeChangedSignal(slot):Connect(function()
+			if pickPanel.Visible then
+				buildPick()
+			end
+		end)
+	end
+
+	waitLabel = UI.label({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.6), Size = UDim2.fromOffset(600, 30), TextSize = 22, Visible = false, Parent = gui })
+	queuePill = UI.label({ AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -100), Size = UDim2.fromOffset(460, 32), BackgroundTransparency = 0.2, BackgroundColor3 = C.Dark, TextColor3 = C.Ally, Visible = false, Parent = gui })
+	toastLabel = UI.label({ AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.22), Size = UDim2.fromOffset(500, 30), BackgroundTransparency = 0.2, BackgroundColor3 = C.Dark, Visible = false, Parent = gui })
+
+	revealCard = UI.new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.4), Size = UDim2.fromOffset(640, 170), BackgroundColor3 = C.Enemy, Visible = false, ZIndex = 5, Parent = gui }, {
+		UI.new("UICorner", { CornerRadius = UDim.new(0, 10) }),
+	})
+	UI.label({ Text = "THESIS LOCKED", Size = UDim2.new(1, 0, 0.45, 0), TextScaled = true, Font = Enum.Font.GothamBlack, TextColor3 = C.Dark, ZIndex = 5, Parent = revealCard })
+	revealCardText = UI.label({ Position = UDim2.fromScale(0, 0.5), Size = UDim2.new(1, 0, 0.45, 0), TextScaled = true, TextColor3 = C.Dark, ZIndex = 5, Parent = revealCard })
+
+	-- Results
+	resultsPanel = UI.panel({ Size = UDim2.fromOffset(480, 470), Parent = gui })
+	list(resultsPanel, 8)
+	UI.new("UIPadding", { PaddingTop = UDim.new(0, 16), Parent = resultsPanel })
+	resultsTitle = UI.label({ Size = UDim2.fromOffset(440, 56), TextSize = 52, Font = Enum.Font.GothamBlack, Parent = resultsPanel })
+	resultsScore = UI.label({ Size = UDim2.fromOffset(440, 30), TextSize = 26, Parent = resultsPanel })
+	resultsLines = UI.label({ Size = UDim2.fromOffset(420, 120), TextSize = 16, TextColor3 = C.Gold, TextYAlignment = Enum.TextYAlignment.Top, Parent = resultsPanel })
+	unlockText = UI.label({ Size = UDim2.fromOffset(420, 22), TextSize = 15, Parent = resultsPanel })
+	local barBack = UI.new("Frame", { Size = UDim2.fromOffset(420, 10), BackgroundColor3 = GREY, BorderSizePixel = 0, Parent = resultsPanel })
+	unlockBar = UI.new("Frame", { BackgroundColor3 = C.Gold, BorderSizePixel = 0, Parent = barBack })
+	rematchButton = UI.button("REMATCH", { BackgroundColor3 = C.Ally, Parent = resultsPanel }, function()
+		requeueAt = nil
+		rematchButton.Text = "WAITING..."
+		Net.Event:FireServer("Rematch")
+	end)
+	requeueButton = UI.button("PLAY AGAIN", { Parent = resultsPanel }, function()
+		requeueAt = os.clock()
+	end)
+	UI.button("LOBBY", { BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = resultsPanel }, function()
+		requeueAt = nil
+		resultsPanel.Visible = false
+	end)
+
+	-- Challenge
+	challengePanel = UI.panel({ Size = UDim2.fromOffset(400, 150), Position = UDim2.fromScale(0.5, 0.25), Parent = gui })
+	challengeText = UI.label({ Position = UDim2.fromOffset(10, 14), Size = UDim2.new(1, -20, 0, 40), TextSize = 20, TextWrapped = true, Parent = challengePanel })
+	local function reply(accept: boolean)
+		if challenger then
+			Net.Event:FireServer("ChallengeReply", challenger, accept)
+		end
+		challenger = nil
+		challengePanel.Visible = false
+	end
+	UI.button("ACCEPT", { Position = UDim2.fromOffset(20, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = C.Good, Parent = challengePanel }, function()
+		reply(true)
+	end)
+	UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
+		reply(false)
+	end)
+
+	ContextActionService:BindAction("Menu", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			toggleLobby()
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.KeyCode.M, Enum.KeyCode.ButtonSelect)
+
+	RunService.RenderStepped:Connect(function()
+		State.menuOpen = lobbyPanel.Visible or shopPanel.Visible or pickPanel.Visible or resultsPanel.Visible or challengePanel.Visible
+		local ph = State.phase
+		if pickPanel.Visible and ph and pickMode == "match" then
+			pickTimer.Text = tostring(math.ceil(math.max(0, ph.endsAt - workspace:GetServerTimeNow())))
+		else
+			pickTimer.Text = ""
+		end
+		queuePill.Visible = State.queue ~= nil and ph == nil
+		if queuePill.Visible then
+			local t = math.floor(os.clock() - State.queuedAt)
+			queuePill.Text = string.format("SEARCHING %s   %d:%02d   ([M] to cancel)", Config.Modes[State.queue].label, t // 60, t % 60)
+		end
+		if requeueAt and resultsPanel.Visible then
+			local left = math.ceil(requeueAt - os.clock())
+			requeueButton.Text = "PLAY AGAIN (" .. math.max(left, 0) .. ")"
+			if left <= 0 then
+				requeueAt = nil
+				resultsPanel.Visible = false
+				Net.Event:FireServer("Queue", State.lastMode)
+			end
+		elseif resultsPanel.Visible then
+			requeueButton.Text = "PLAY AGAIN"
+		end
+	end)
+end
+
+return Menus
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="16">
+          <Properties>
+            <string name="Name">Movement</string>
+            <string name="Source"><![CDATA[-- Slide, dash, crouch and per-weapon move speed. The client moves its own character; the server sanity-checks speed.
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Config = require(ReplicatedStorage.Shared.Config)
+local State = require(script.Parent.State)
+
+local Movement = {}
+local Mv = Config.Movement
+local player = Players.LocalPlayer
+local crouchHeld = false
+local slideStart, slideEnd = 0, -99
+local slideDir = Vector2.zero
+local slideForce: LinearVelocity?
+local camDrop = 0
+
+local function body()
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if hum and root and hum.Health > 0 and not root.Anchored then
+		return hum, root
+	end
+	return nil
+end
+
+-- Horizontal-only velocity constraint; gravity and jumping still work.
+local function push(root: BasePart, velocity: Vector2): LinearVelocity
+	local att = root:FindFirstChild("MoveAttachment") or Instance.new("Attachment")
+	att.Name = "MoveAttachment"
+	att.Parent = root
+	local lv = Instance.new("LinearVelocity")
+	lv.Attachment0 = att
+	lv.RelativeTo = Enum.ActuatorRelativeTo.World
+	lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+	lv.PrimaryTangentAxis = Vector3.xAxis
+	lv.SecondaryTangentAxis = Vector3.zAxis
+	lv.MaxForce = 1e6
+	lv.PlaneVelocity = velocity
+	lv.Parent = root
+	return lv
+end
+
+local function stopSlide()
+	State.sliding = false
+	slideEnd = os.clock()
+	if slideForce then
+		slideForce:Destroy()
+		slideForce = nil
+	end
+end
+
+local function onCrouch(_, inputState)
+	crouchHeld = inputState == Enum.UserInputState.Begin
+	local hum, root = body()
+	if crouchHeld and hum and not State.sliding and os.clock() - slideEnd >= Mv.SlideCooldown then
+		local flat = root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)
+		if flat.Magnitude >= Mv.SlideMinSpeed and hum.FloorMaterial ~= Enum.Material.Air then
+			State.sliding = true
+			slideStart = os.clock()
+			slideDir = Vector2.new(flat.Unit.X, flat.Unit.Z)
+			slideForce = push(root, slideDir * Mv.SlideStart)
+		end
+	end
+	return Enum.ContextActionResult.Sink
+end
+
+local function onDash(_, inputState)
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+	local hum, root = body()
+	if not hum or os.clock() < State.dashReadyAt or State.menuOpen then
+		return Enum.ContextActionResult.Sink
+	end
+	stopSlide()
+	State.dashReadyAt = os.clock() + Mv.DashRecharge
+	local dir = hum.MoveDirection
+	if dir.Magnitude < 0.1 then
+		dir = workspace.CurrentCamera.CFrame.LookVector
+	end
+	dir = (dir * Vector3.new(1, 0, 1)).Unit
+	State.dashing = true
+	local lv = push(root, Vector2.new(dir.X, dir.Z) * (Mv.DashDistance / Mv.DashTime))
+	task.delay(Mv.DashTime, function()
+		lv:Destroy()
+		State.dashing = false
+	end)
+	return Enum.ContextActionResult.Sink
+end
+
+function Movement.init()
+	ContextActionService:BindAction("Slide", onCrouch, true, Enum.KeyCode.C, Enum.KeyCode.LeftControl, Enum.KeyCode.ButtonB)
+	ContextActionService:BindAction("Dash", onDash, true, Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL1)
+	ContextActionService:SetTitle("Slide", "Slide")
+	ContextActionService:SetTitle("Dash", "Dash")
+
+	player.CharacterAdded:Connect(function()
+		stopSlide()
+		State.dashing = false
+	end)
+
+	RunService.RenderStepped:Connect(function(dt)
+		local hum = body()
+		if not hum then
+			return
+		end
+		local w = Config.Weapons[State.weaponId or ""]
+		local speed = Mv.WalkSpeed * (w and w.speed or 1)
+		if State.ads then
+			speed *= Mv.AdsMult
+		end
+		if crouchHeld and not State.sliding then
+			speed = math.min(speed, Mv.CrouchSpeed)
+		end
+		hum.WalkSpeed = speed
+
+		if State.sliding then
+			local k = (os.clock() - slideStart) / Mv.SlideTime
+			if k >= 1 or not slideForce then
+				stopSlide()
+			else
+				slideForce.PlaneVelocity = slideDir * (Mv.SlideStart + (Mv.SlideEnd - Mv.SlideStart) * k)
+			end
+		end
+
+		local low = (crouchHeld or State.sliding) and Mv.CrouchDrop or 0
+		camDrop += (low - camDrop) * math.min(dt * 15, 1)
+		hum.CameraOffset = Vector3.new(0, -camDrop, 0)
+	end)
+end
+
+return Movement
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="17">
+          <Properties>
+            <string name="Name">State</string>
+            <string name="Source"><![CDATA[-- Shared client state.
+return {
+	profile = nil, -- server profile snapshot
+	phase = nil, -- current match phase payload (nil in lobby)
+	queue = nil, -- queued mode name
+	queuedAt = 0,
+	lastMode = nil, -- last queued mode, for auto-requeue
+	slot = 1,
+	ads = false,
+	scoped = false,
+	sliding = false,
+	dashing = false,
+	dashReadyAt = 0,
+	menuOpen = false,
+	weaponId = nil,
+	ammo = 0,
+	mag = 0,
+	reloading = false,
+}
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">UI</string>
+            <string name="Source"><![CDATA[-- Tiny UI and sound helpers.
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local UI = {}
+local C = Config.Colors
+
+function UI.new(class: string, props: { [string]: any }?, children: { Instance }?): any
+	local inst = Instance.new(class)
+	for k, v in props or {} do
+		if k ~= "Parent" then
+			inst[k] = v
+		end
+	end
+	for _, child in children or {} do
+		child.Parent = inst
+	end
+	if props and props.Parent then
+		inst.Parent = props.Parent
+	end
+	return inst
+end
+
+function UI.label(props): TextLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = C.Light,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		Size = UDim2.fromOffset(200, 30),
+	}
+	for k, v in props do
+		defaults[k] = v
+	end
+	return UI.new("TextLabel", defaults)
+end
+
+function UI.panel(props): Frame
+	local defaults = {
+		BackgroundColor3 = C.Dark,
+		BackgroundTransparency = 0.08,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Visible = false,
+	}
+	for k, v in props do
+		defaults[k] = v
+	end
+	local frame = UI.new("Frame", defaults, { UI.new("UICorner", { CornerRadius = UDim.new(0, 10) }) })
+	-- A visible Modal button frees the mouse from first-person lock while the panel is open.
+	UI.new("TextButton", { Modal = true, Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(1, 1), Parent = frame })
+	return frame
+end
+
+function UI.button(text: string, props, onClick: () -> ()): TextButton
+	local defaults = {
+		Text = text,
+		BackgroundColor3 = C.Light,
+		TextColor3 = C.Dark,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 18,
+		AutoButtonColor = true,
+		Size = UDim2.fromOffset(220, 44),
+	}
+	for k, v in props or {} do
+		defaults[k] = v
+	end
+	local b = UI.new("TextButton", defaults, { UI.new("UICorner", { CornerRadius = UDim.new(0, 8) }) })
+	b.Activated:Connect(function()
+		UI.sound(Config.Sounds.Button, 1, 0.3)
+		onClick()
+	end)
+	return b
+end
+
+function UI.sound(id: string?, speed: number?, volume: number?)
+	if not id or id == "" then
+		return
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.PlaybackSpeed = speed or 1
+	s.Volume = volume or 0.5
+	s.Parent = SoundService
+	s:Play()
+	Debris:AddItem(s, 4)
+end
+
+function UI.relColor(team: number?, myTeam: number?): Color3
+	return team == myTeam and C.Ally or C.Enemy
+end
+
+return UI
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
+          <Properties>
+            <string name="Name">Weapons</string>
+            <string name="Source"><![CDATA[-- Weapon input, firing, recoil, ADS and the first-person viewmodel. The server validates every shot.
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+local WeaponModels = require(ReplicatedStorage.Shared.WeaponModels)
+local State = require(script.Parent.State)
+local UI = require(script.Parent.UI)
+local Hud = require(script.Parent.Hud)
+
+local Weapons = {}
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local ammo = {}
+local reloadUntil = {}
+local nextShot = 0
+local lastShotAt = 0
+local fireHeld, triggerPulled = false, false
+local viewmodel: Model?
+local kick, swing, adsAlpha = 0, 0, 0
+local HIP = CFrame.new(1.1, -1.1, -2.2)
+local ADS = CFrame.new(0, -0.55, -1.6)
+local params = RaycastParams.new()
+params.FilterType = Enum.RaycastFilterType.Exclude
+
+local function equippedId(): string?
+	return player:GetAttribute(Config.Slots[State.slot])
+end
+
+local function canAct(): boolean
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (hum and root and hum.Health > 0) or root.Anchored or State.dashing or State.menuOpen then
+		return false
+	end
+	local ph = State.phase
+	return player:GetAttribute("MatchId") == 0 or (ph ~= nil and (ph.phase == "Live" or ph.phase == "Collapse"))
+end
+
+local function buildViewmodel()
+	if viewmodel then
+		viewmodel:Destroy()
+		viewmodel = nil
+	end
+	local id = equippedId()
+	if not id or not player.Character then
+		return
+	end
+	viewmodel = WeaponModels.build(id, player:GetAttribute("Palette"))
+	for _, p in viewmodel:GetDescendants() do
+		if p:IsA("BasePart") then
+			p.Anchored = true
+		end
+	end
+	viewmodel.Parent = camera
+end
+
+local function resetAmmo()
+	ammo, reloadUntil = {}, {}
+	for _, slot in Config.Slots do
+		local id = player:GetAttribute(slot)
+		local w = Config.Weapons[id or ""]
+		if w and w.mag then
+			ammo[id] = w.mag
+		end
+	end
+end
+
+local function cone(dir: Vector3, degrees: number): Vector3
+	if degrees <= 0 then
+		return dir
+	end
+	local r = math.rad(degrees) * math.sqrt(math.random())
+	local theta = math.random() * math.pi * 2
+	return (CFrame.lookAt(Vector3.zero, dir) * CFrame.Angles(0, 0, theta) * CFrame.Angles(r, 0, 0)).LookVector
+end
+
+function Weapons.reload()
+	local id = equippedId()
+	local w = Config.Weapons[id or ""]
+	if not (w and w.mag) or ammo[id] >= w.mag or os.clock() < (reloadUntil[id] or 0) then
+		return
+	end
+	local time = w.perShell and w.reload * (w.mag - ammo[id]) or w.reload
+	reloadUntil[id] = os.clock() + time
+	Net.Event:FireServer("Reload", id)
+	task.delay(time, function()
+		if ammo[id] then
+			ammo[id] = w.mag
+		end
+	end)
+end
+
+local function shoot(id: string, w)
+	local origin = camera.CFrame.Position
+	local root = player.Character.HumanoidRootPart
+	local moving = (root.AssemblyLinearVelocity * Vector3.new(1, 0, 1)).Magnitude > 4
+	local spread = State.ads and w.adsSpread or w.spread
+	if moving then
+		spread = spread * 1.6 + (State.ads and 0 or 1)
+	elseif not w.pellets and not w.scope and os.clock() - lastShotAt > 0.3 then
+		spread = 0 -- counter-strafe reward: perfect first shot when stopped
+	end
+	params.FilterDescendantsInstances = { player.Character, camera }
+	local shots = {}
+	for i = 1, w.pellets or 1 do
+		local dir = cone(camera.CFrame.LookVector, spread)
+		local hit = workspace:Raycast(origin, dir * Config.Range, params)
+		shots[i] = { dir, hit and hit.Instance, hit and hit.Position or origin + dir * Config.Range }
+	end
+	Net.Event:FireServer("Fire", id, origin, shots, workspace:GetServerTimeNow(), State.scoped)
+	lastShotAt = os.clock()
+	ammo[id] -= 1
+
+	local muzzle = viewmodel and viewmodel.PrimaryPart:FindFirstChild("Muzzle")
+	local from = muzzle and not State.scoped and muzzle.WorldPosition or origin - Vector3.new(0, 0.3, 0)
+	for _, s in shots do
+		Hud.tracer(from, s[3])
+	end
+	UI.sound(Config.Sounds.Shot, w.pellets and 1.1 or w.scope and 0.9 or 1.6, 0.35)
+	local recoil = w.recoil * (State.ads and 0.6 or 1)
+	camera.CFrame *= CFrame.Angles(math.rad(recoil), math.rad((math.random() - 0.5) * recoil * 0.3), 0)
+	kick = math.min(kick + 0.4, 1)
+	if ammo[id] <= 0 then
+		task.delay(0.15, Weapons.reload)
+	end
+end
+
+local function tryFire()
+	local id = equippedId()
+	local w = Config.Weapons[id or ""]
+	local now = os.clock()
+	if not w or not canAct() or now < nextShot or now < (reloadUntil[id] or 0) then
+		return
+	end
+	if w.slot == "Melee" then
+		if not triggerPulled then
+			return
+		end
+		triggerPulled = false
+		nextShot = now + w.interval
+		swing = 1
+		UI.sound(Config.Sounds.Melee, 1, 0.5)
+		params.FilterDescendantsInstances = { player.Character, camera }
+		local hit = workspace:Spherecast(camera.CFrame.Position, 1.5, camera.CFrame.LookVector * w.range, params)
+		if hit then
+			Net.Event:FireServer("Melee", hit.Instance)
+		end
+		return
+	end
+	if not (w.auto or triggerPulled) then
+		return
+	end
+	triggerPulled = false
+	if ammo[id] <= 0 then
+		Weapons.reload()
+		return
+	end
+	if w.burst then
+		nextShot = now + w.burstDelay + w.interval * (w.burst - 1)
+		task.spawn(function()
+			for i = 1, w.burst do
+				if ammo[id] <= 0 or not canAct() or equippedId() ~= id then
+					break
+				end
+				shoot(id, w)
+				if i < w.burst then
+					task.wait(w.interval)
+				end
+			end
+		end)
+	else
+		nextShot = now + w.interval
+		shoot(id, w)
+	end
+end
+
+function Weapons.equip(slot: number)
+	if slot == State.slot or not player:GetAttribute(Config.Slots[slot]) then
+		return
+	end
+	State.slot = slot
+	nextShot = os.clock() + (slot == 1 and 0.35 or slot == 2 and 0.2 or 0.15)
+	buildViewmodel()
+	Net.Event:FireServer("Equip", slot)
+end
+
+local function refresh()
+	resetAmmo()
+	buildViewmodel()
+	Net.Event:FireServer("Equip", State.slot)
+end
+
+local function render(dt: number)
+	local id = equippedId()
+	local w = Config.Weapons[id or ""]
+	local wantAds = State.ads and w ~= nil and w.adsFov ~= nil and canAct()
+	adsAlpha += ((wantAds and 1 or 0) - adsAlpha) * math.min(dt * 18, 1)
+	local baseFov = State.profile and State.profile.fov or 70
+	local targetFov = wantAds and w.adsFov or baseFov
+	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.min(dt * 18, 1)
+	State.scoped = wantAds and w.scope == true and adsAlpha > 0.9
+	UserInputService.MouseDeltaSensitivity = wantAds and w.adsFov / baseFov or 1
+
+	State.weaponId = id
+	State.ammo = ammo[id or ""] or 0
+	State.mag = w and w.mag or 0
+	State.reloading = os.clock() < (reloadUntil[id or ""] or 0)
+
+	kick = math.max(kick - dt * 8, 0)
+	swing = math.max(swing - dt * 5, 0)
+	if viewmodel then
+		local cf = camera.CFrame
+			* HIP:Lerp(ADS, adsAlpha)
+			* CFrame.new(0, 0, kick * 0.3)
+			* CFrame.Angles(kick * 0.15, swing * 1.2, 0)
+		viewmodel:PivotTo(State.scoped and cf * CFrame.new(0, -50, 0) or cf)
+	end
+	if fireHeld then
+		tryFire()
+	end
+end
+
+local function bind(name: string, handler, touch: boolean, ...)
+	ContextActionService:BindAction(name, function(_, inputState, input)
+		if State.menuOpen and inputState == Enum.UserInputState.Begin then
+			return Enum.ContextActionResult.Pass
+		end
+		handler(inputState, input)
+		return Enum.ContextActionResult.Pass
+	end, touch, ...)
+	if touch then
+		ContextActionService:SetTitle(name, name)
+	end
+end
+
+function Weapons.init()
+	RunService:BindToRenderStep("Viewmodel", Enum.RenderPriority.Camera.Value + 1, render)
+
+	bind("Fire", function(s)
+		fireHeld = s == Enum.UserInputState.Begin
+		triggerPulled = fireHeld
+		if fireHeld then
+			tryFire()
+		end
+	end, true, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
+	bind("Aim", function(s, input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			if s == Enum.UserInputState.Begin then
+				State.ads = not State.ads
+			end
+		else
+			State.ads = s == Enum.UserInputState.Begin
+		end
+	end, true, Enum.UserInputType.MouseButton2, Enum.KeyCode.ButtonL2)
+	bind("Reload", function(s)
+		if s == Enum.UserInputState.Begin then
+			Weapons.reload()
+		end
+	end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonX)
+	bind("Utility", function(s)
+		if s == Enum.UserInputState.Begin and canAct() and (player:GetAttribute("Charges") or 0) > 0 then
+			Net.Event:FireServer("Throw", camera.CFrame.Position, camera.CFrame.LookVector)
+		end
+	end, true, Enum.KeyCode.G, Enum.KeyCode.ButtonR1)
+	bind("Swap", function(s)
+		if s == Enum.UserInputState.Begin then
+			Weapons.equip(State.slot % 3 + 1)
+		end
+	end, true, Enum.KeyCode.ButtonY)
+	for i, key in { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three } do
+		bind("Slot" .. i, function(s)
+			if s == Enum.UserInputState.Begin then
+				Weapons.equip(i)
+			end
+		end, false, key)
+	end
+
+	local function onCharacter(char: Model)
+		State.slot = 1
+		State.ads = false
+		refresh()
+		char:WaitForChild("Humanoid").Died:Connect(function()
+			if viewmodel then
+				viewmodel:Destroy()
+				viewmodel = nil
+			end
+		end)
+	end
+	player.CharacterAdded:Connect(onCharacter)
+	if player.Character then
+		task.spawn(onCharacter, player.Character)
+	end
+	for _, attr in { "Primary", "Secondary", "Melee", "Utility", "Palette" } do
+		player:GetAttributeChangedSignal(attr):Connect(function()
+			if player.Character then
+				refresh()
+			end
+		end)
+	end
+end
+
+return Weapons
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+</roblox>
