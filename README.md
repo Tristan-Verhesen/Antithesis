@@ -33,7 +33,16 @@ The full design is in [`GAME_DESIGN.md`](GAME_DESIGN.md). Everything is code: th
 - **Lobby:** firing range with dummies, weekly wins leaderboard, shop, loadout editor, FOV setting.
 - **Saving:** DataStore, with protection against overwriting real data after a failed load.
 
-## Setup (about 10 minutes)
+## Quick test (no setup)
+1. Download **`Antithesis.rbxlx`** from this repo and double-click it to open it in Roblox Studio.
+2. Go to **File → Game Settings → Avatar** and set the avatar type to **R6**. If this option is greyed out, publish the place first (**File → Publish to Roblox**).
+3. Press **Play** to try the firing range alone. To test a duel, open the **Test** tab, set **Clients and Servers** to 2 players, then click **Start**. In each player window, press **M** and choose **DUEL 1v1**.
+
+Coins only save after you publish and turn on **Game Settings → Security → Enable Studio Access to API Services**. Until then the game still runs, but progress resets each session.
+
+`Antithesis.rbxlx` is built from `src/` with `rojo build -o Antithesis.rbxlx`. Rebuild it after changing code, or use the live-sync setup below while developing.
+
+## Setup for development (about 10 minutes)
 1. Install **Roblox Studio** and **VS Code**.
 2. In VS Code, install the **Rojo** extension (by evaera). Open this folder, run **"Rojo: Open menu"**, then click **Install Roblox Studio plugin** and **Start server** for `default.project.json`.
    - CLI alternative: install Rojo 7.4+ and run `rojo serve`.
