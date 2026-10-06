@@ -56,7 +56,7 @@ Why it works:
 
 ### 1.4 Aesthetic: "Contrast"
 - **Surfaces:** matte low-poly in two neutrals, off-white `#E8E6E1` and graphite `#2B2D31`. Everything uses part color + SmoothPlastic, with almost no textures. This is the cheapest style to build alone and the fastest to render.
-- **Arenas:** 180° rotationally symmetric, with a light half and a dark half. That gives instant orientation, and the symmetry means no side swaps.
+- **Arenas:** mirror-symmetric, with a light half and a dark half. That gives instant orientation, and the symmetry means no side swaps.
 - **Colors are perspective-relative:** your side is always **Cyan `#22D3EE`** and enemies are always **Orange `#FB923C`**. The pair is colorblind-safe.
 - **Enemy rim:** a `Highlight` outline (FillTransparency 1, OutlineTransparency 0.4) on enemies, so dark avatar outfits can't camouflage.
 - **No gore:** eliminated players shatter into low-poly shards in their team color.
