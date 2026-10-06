@@ -27,7 +27,7 @@ Config.Movement = {
 	DashDistance = 20,
 	DashTime = 0.18,
 	DashRecharge = 4.0,
-	MaxAvgSpeed = 60, -- server anti-speed check, studs/s averaged over 0.5s
+	MaxAvgSpeed = 75, -- server anti-speed check (studs/s); legal slide + dash peaks near 60
 }
 
 Config.Modes = {
@@ -42,7 +42,8 @@ Config.Match = {
 	CollapseMinRadius = 8,
 	RoundEnd = 3,
 	ResultsTime = 10, -- rematch window
-	RewindCap = 0.2,
+	RewindCap = 0.4, -- max lag-compensation rewind (s)
+	InterpDelay = 0.1, -- Roblox interpolation buffer for other players; tune in playtests
 }
 
 -- Lobby: a round hub with four arms in a + shape.

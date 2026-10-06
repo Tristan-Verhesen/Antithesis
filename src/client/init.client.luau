@@ -94,8 +94,14 @@ RunService.RenderStepped:Connect(function()
 	if fp ~= firstPerson then
 		firstPerson = fp
 		player.CameraMode = fp and Enum.CameraMode.LockFirstPerson or Enum.CameraMode.Classic
-		player.CameraMinZoomDistance = fp and 0.5 or Config.Lobby.MinZoom
-		player.CameraMaxZoomDistance = fp and 0.5 or Config.Lobby.MaxZoom
+		-- Order matters: Roblox clamps Min down to the current Max, so never write Min above Max.
+		if fp then
+			player.CameraMinZoomDistance = 0.5
+			player.CameraMaxZoomDistance = 0.5
+		else
+			player.CameraMaxZoomDistance = Config.Lobby.MaxZoom
+			player.CameraMinZoomDistance = Config.Lobby.MinZoom
+		end
 	end
 end)
 

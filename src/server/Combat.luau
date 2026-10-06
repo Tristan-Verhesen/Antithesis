@@ -67,24 +67,36 @@ local function allowed(attacker: Player, model: Model, victim: Player?): boolean
 	return model:GetAttribute("Dummy") == true and attacker:GetAttribute("MatchId") == 0
 end
 
-local function validHit(origin: Vector3, dir: Vector3, part: BasePart, victim: Player?, t: number): boolean
-	local center = part.Position
-	if victim then
-		local root = victim.Character and victim.Character:FindFirstChild("HumanoidRootPart")
-		if not root then
-			return false
+-- Returns the server-checked distance to the hit, or nil if the shot could not have hit.
+-- The shooter sees other players about one network leg + interpolation in the past,
+-- so several moments in that window are tested (lag compensation).
+local function validHit(origin: Vector3, dir: Vector3, part: BasePart, victim: Player?, fireTime: number, t: number): number?
+	local root = victim and victim.Character and victim.Character:FindFirstChild("HumanoidRootPart")
+	if victim and not root then
+		return nil
+	end
+	local times = { t }
+	if root then
+		local cap = Config.Match.RewindCap
+		local fired = math.min(fireTime, t)
+		local lat = math.clamp(t - fired, 0, cap)
+		local earliest = math.max(t - 2 * lat - Config.Match.InterpDelay, t - cap)
+		times = {}
+		for i = 0, 4 do
+			table.insert(times, earliest + (fired - earliest) * i / 4)
 		end
-		center = (rootAt(victim, root, t) * root.CFrame:ToObjectSpace(part.CFrame)).Position
 	end
-	local toC = center - origin
-	local along = toC:Dot(dir)
-	if along < 0 or along > Config.Range then
-		return false
+	for _, at in times do
+		local center = root and (rootAt(victim, root, at) * root.CFrame:ToObjectSpace(part.CFrame)).Position or part.Position
+		local toC = center - origin
+		local along = toC:Dot(dir)
+		if along >= 0 and along <= Config.Range
+			and (toC - dir * along).Magnitude <= part.Size.Magnitude / 2 + 1.5
+			and workspace:Raycast(origin, dir * math.max(along - 1, 0.01), mapParams) == nil then
+			return along
+		end
 	end
-	if (toC - dir * along).Magnitude > part.Size.Magnitude / 2 + 1.5 then
-		return false
-	end
-	return workspace:Raycast(origin, dir * math.max(along - 1, 0.01), mapParams) == nil
+	return nil
 end
 
 local function damageFor(w, part: BasePart, dist: number): number
@@ -191,8 +203,14 @@ function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fir
 	if not char or player:GetAttribute(w.slot) ~= weaponId then
 		return
 	end
-	if (origin - char.Head.Position).Magnitude > 8 then
+	local head = char.Head.Position
+	if (origin - head).Magnitude > 8 then
 		return
+	end
+	-- Never let a shot start on the far side of a wall.
+	local blocked = workspace:Raycast(head, origin - head, mapParams)
+	if blocked then
+		origin = blocked.Position + blocked.Normal * 0.1
 	end
 	local t = now()
 	if (s.reloadUntil[weaponId] or 0) > t or s.ammo[weaponId] <= 0 then
@@ -209,7 +227,6 @@ function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fir
 	s.last[weaponId] = t
 	s.ammo[weaponId] -= 1
 
-	local rewindTo = math.clamp(fireTime, t - Config.Match.RewindCap, t)
 	local hits = {}
 	for i = 1, math.min(#shots, w.pellets or 1) do
 		local shot = shots[i]
@@ -221,10 +238,11 @@ function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fir
 			continue
 		end
 		local model, hum, victim = targetOf(part)
-		if model and allowed(player, model, victim) and validHit(origin, dir, part, victim, rewindTo) then
+		local along = model and allowed(player, model, victim) and validHit(origin, dir, part, victim, fireTime, t)
+		if along then
 			local h = hits[model] or { hum = hum, victim = victim, dmg = 0, head = false }
 			hits[model] = h
-			h.dmg += damageFor(w, part, (pos - origin).Magnitude)
+			h.dmg += damageFor(w, part, along) -- falloff uses the server-checked distance
 			h.head = h.head or part.Name == "Head"
 		end
 	end
@@ -280,6 +298,10 @@ function Combat.melee(player: Player, part: any)
 	if toTarget.Magnitude > w.range + 3 then
 		return
 	end
+	local head = char:FindFirstChild("Head")
+	if not head or workspace:Raycast(head.Position, part.Position - head.Position, mapParams) then
+		return -- no knifing through walls
+	end
 	local behind = toTarget.Magnitude > 0.1 and troot.CFrame.LookVector:Dot(toTarget.Unit) > 0.5
 	local dmg = behind and w.backstab or w.damage
 	local killed = Combat.applyDamage(player, model, hum, victim, dmg, id, { backstab = behind })
@@ -297,8 +319,7 @@ local function frag(attacker: Player, pos: Vector3, w)
 		local char = p.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		local torso = char and (char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
-		local selfHit = p == attacker and attacker:GetAttribute("MatchId") ~= 0
-		if hum and torso and (selfHit or Combat.canDamage(attacker, p)) then
+		if hum and torso and Combat.canDamage(attacker, p) then
 			local d = (torso.Position - pos).Magnitude
 			if d <= w.radius and not workspace:Raycast(pos, torso.Position - pos, mapParams) then
 				local dmg = d <= w.innerRadius and w.damage
@@ -370,7 +391,14 @@ function Combat.throw(player: Player, origin: any, dir: any)
 	g.Color = Config.Colors.Gold
 	g.Material = Enum.Material.Neon
 	g.CanQuery = false
-	g.CFrame = CFrame.new(origin + dir * 2)
+	-- Spawn from the server's head position, never past a wall.
+	local head = char.Head.Position
+	local spawnPos = head + dir * 2
+	local hit = workspace:Raycast(head, spawnPos - head, mapParams)
+	if hit then
+		spawnPos = hit.Position - dir * 0.5
+	end
+	g.CFrame = CFrame.new(spawnPos)
 	g.Parent = workspace
 	g:SetNetworkOwner(nil)
 	g.AssemblyLinearVelocity = dir * 70 + Vector3.new(0, 12, 0)
@@ -410,15 +438,17 @@ function Combat.start()
 	task.spawn(function()
 		while true do
 			task.wait(0.5)
+			local t = os.clock()
 			for _, player in Players:GetPlayers() do
 				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 				if root and not root.Anchored then
 					local last = lastPos[player]
-					local flat = last and (root.Position - last) * Vector3.new(1, 0, 1)
-					if flat and flat.Magnitude / 0.5 > Config.Movement.MaxAvgSpeed then
-						root.CFrame = CFrame.new(last) * root.CFrame.Rotation
+					local flat = last and (root.Position - last.pos) * Vector3.new(1, 0, 1)
+					if flat and flat.Magnitude / math.max(t - last.t, 0.5) > Config.Movement.MaxAvgSpeed then
+						root.CFrame = CFrame.new(last.pos) * root.CFrame.Rotation
+						last.t = t
 					else
-						lastPos[player] = root.Position
+						lastPos[player] = { pos = root.Position, t = t }
 					end
 				end
 			end

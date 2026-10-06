@@ -82,11 +82,17 @@ local function spawnAll(m)
 	for t, team in m.teams do
 		for i, p in team do
 			if p.Parent and byPlayer[p] == m then
-				p:LoadCharacter()
+				local ok, err = pcall(p.LoadCharacter, p)
+				if not ok then
+					warn("[Match] LoadCharacter failed for", p.Name, err)
+					continue
+				end
+				-- LoadCharacter yields: re-check the player is still here and in this match.
 				local char = p.Character
-				if char then
+				local root = char and byPlayer[p] == m and char:FindFirstChild("HumanoidRootPart")
+				if root then
 					char:PivotTo(m.arena.spawns[t][i])
-					char.HumanoidRootPart.Anchored = true
+					root.Anchored = true
 					Combat.clear(p)
 					Combat.reset(p)
 				end
@@ -208,9 +214,10 @@ local function roundEnd(m, winner: number)
 end
 
 local function finish(m)
-	local winner = m.forfeit
-		or (m.score[1] >= m.cfg.winsNeeded and 1)
+	-- A decided score wins over a forfeit (someone leaving during the final round-end screen).
+	local winner = (m.score[1] >= m.cfg.winsNeeded and 1)
 		or (m.score[2] >= m.cfg.winsNeeded and 2)
+		or m.forfeit
 		or 0
 	local group = { mode = m.mode, teams = m.teams, votes = {}, expires = os.clock() + M.ResultsTime }
 	for _, p in m.players do
@@ -236,7 +243,7 @@ local function finish(m)
 	World.destroyArena(m.arena)
 end
 
-local function run(m)
+local function play(m)
 	while not m.over do
 		m.round += 1
 		spawnAll(m)
@@ -253,6 +260,14 @@ local function run(m)
 		if m.score[1] >= m.cfg.winsNeeded or m.score[2] >= m.cfg.winsNeeded then
 			break
 		end
+	end
+end
+
+-- finish always runs, even after an error, so players are never stranded in an arena.
+local function run(m)
+	local ok, err = pcall(play, m)
+	if not ok then
+		warn("[Match] match error:", err)
 	end
 	finish(m)
 end
@@ -349,6 +364,13 @@ function Match.onLeave(player: Player)
 	end
 	byPlayer[player] = nil
 	local team = player:GetAttribute("Team")
+	-- Leaving counts as a loss unless this player's team had already won (profile still exists here).
+	local profile = Data.get(player)
+	if profile and m.score[team] < m.cfg.winsNeeded and m.forfeit ~= team then
+		profile.matches += 1
+		profile.losses += 1
+		profile.streak = 0
+	end
 	for _, p in m.teams[team] do
 		if p ~= player and byPlayer[p] == m then
 			return
@@ -362,7 +384,7 @@ function Match.start()
 	Combat.canDamage = function(a, v)
 		local m = byPlayer[a]
 		return m ~= nil and m == byPlayer[v] and (m.phase == "Live" or m.phase == "Collapse")
-			and a:GetAttribute("Team") ~= v:GetAttribute("Team")
+			and (a == v or a:GetAttribute("Team") ~= v:GetAttribute("Team")) -- a == v: own frag
 	end
 	Combat.audience = function(p)
 		local m = byPlayer[p]

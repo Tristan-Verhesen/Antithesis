@@ -139,6 +139,7 @@ local function dummy(parent: Instance, pos: Vector3)
 	limb("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0), C.Dark)
 	limb("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0), C.Dark)
 	local hum = Instance.new("Humanoid")
+	hum.RequiresNeck = false -- anchored, unjointed limbs; otherwise the Humanoid dies on spawn
 	hum.Parent = m
 	m.PrimaryPart = root
 	m:SetAttribute("Dummy", true)

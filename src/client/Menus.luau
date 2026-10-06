@@ -23,8 +23,9 @@ local questsPanel, questsList
 local zone: string? = nil -- lobby walk-in zone the player is standing in ("Shop" / "Quests")
 local padPill, toastLabel
 local resultsPanel, resultsTitle, resultsScore, resultsLines, unlockBar, unlockText, rematchButton
-local challengePanel, challengeText
+local challengePanel, challengeText, declineButton
 local challenger: Player? = nil
+local rematchUntil = 0
 
 local function focus(button: GuiObject)
 	if UserInputService.GamepadEnabled then
@@ -246,6 +247,8 @@ function Menus.results(data)
 		unlockBar.Size = UDim2.fromScale(1, 1)
 	end
 	rematchButton.Text = "REMATCH"
+	rematchButton.BackgroundColor3 = C.Ally
+	rematchUntil = os.clock() + Config.Match.ResultsTime - 0.5 -- small margin for latency
 	loadoutPanel.Visible = false
 	shopPanel.Visible = false
 	questsPanel.Visible = false
@@ -257,6 +260,7 @@ function Menus.challenged(from: Player)
 	challenger = from
 	challengeText.Text = from.DisplayName .. " challenges you to a 1v1"
 	challengePanel.Visible = true
+	focus(declineButton) -- a stray A press while jumping declines rather than starting a duel
 	task.delay(15, function()
 		if challenger == from then
 			challengePanel.Visible = false
@@ -391,6 +395,11 @@ function Menus.init(gui: ScreenGui)
 	local barBack = UI.new("Frame", { Size = UDim2.fromOffset(420, 10), BackgroundColor3 = GREY, BorderSizePixel = 0, Parent = resultsPanel })
 	unlockBar = UI.new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.Gold, BorderSizePixel = 0, Parent = barBack })
 	rematchButton = UI.button("REMATCH", { BackgroundColor3 = C.Ally, Parent = resultsPanel }, function()
+		if os.clock() > rematchUntil then
+			rematchButton.Text = "REMATCH EXPIRED"
+			rematchButton.BackgroundColor3 = GREY
+			return
+		end
 		rematchButton.Text = "WAITING..."
 		Net.Event:FireServer("Rematch")
 	end)
@@ -411,7 +420,7 @@ function Menus.init(gui: ScreenGui)
 	UI.button("ACCEPT", { Position = UDim2.fromOffset(20, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = C.Good, Parent = challengePanel }, function()
 		reply(true)
 	end)
-	UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
+	declineButton = UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
 		reply(false)
 	end)
 

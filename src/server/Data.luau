@@ -8,11 +8,16 @@ local Net = require(ReplicatedStorage.Shared.Net)
 
 local Data = {}
 local profiles: { [Player]: any } = {}
-local store, weekly
+local store
 pcall(function()
 	store = DataStoreService:GetDataStore("Antithesis_v1")
-	weekly = DataStoreService:GetOrderedDataStore("WeeklyWins_" .. os.time() // 604800)
 end)
+
+-- Resolved per use so a long-running server rolls over to the new week.
+local function weeklyStore()
+	local ok, s = pcall(DataStoreService.GetOrderedDataStore, DataStoreService, "WeeklyWins_" .. os.time() // 604800)
+	return ok and s or nil
+end
 
 local function today(): number
 	return os.time() // 86400
@@ -99,6 +104,9 @@ function Data.load(player: Player)
 		end
 	end
 	p._noSave = not ok -- never overwrite real data with defaults after a failed load
+	if not player.Parent then
+		return p -- left while loading; don't keep (and keep saving) a stale profile
+	end
 	profiles[player] = p
 
 	local stats = Instance.new("Folder")
@@ -164,6 +172,7 @@ function Data.claimQuest(player: Player, index: any)
 end
 
 function Data.addWeeklyWin(player: Player)
+	local weekly = weeklyStore()
 	if weekly then
 		task.spawn(pcall, weekly.IncrementAsync, weekly, tostring(player.UserId), 1)
 	end
@@ -257,6 +266,7 @@ end)
 
 local names = {}
 local function refreshBoard(World)
+	local weekly = weeklyStore()
 	if not weekly then
 		return
 	end

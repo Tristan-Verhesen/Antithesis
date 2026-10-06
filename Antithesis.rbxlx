@@ -39,7 +39,7 @@ Config.Movement = {
 	DashDistance = 20,
 	DashTime = 0.18,
 	DashRecharge = 4.0,
-	MaxAvgSpeed = 60, -- server anti-speed check, studs/s averaged over 0.5s
+	MaxAvgSpeed = 75, -- server anti-speed check (studs/s); legal slide + dash peaks near 60
 }
 
 Config.Modes = {
@@ -54,7 +54,8 @@ Config.Match = {
 	CollapseMinRadius = 8,
 	RoundEnd = 3,
 	ResultsTime = 10, -- rematch window
-	RewindCap = 0.2,
+	RewindCap = 0.4, -- max lag-compensation rewind (s)
+	InterpDelay = 0.1, -- Roblox interpolation buffer for other players; tune in playtests
 }
 
 -- Lobby: a round hub with four arms in a + shape.
@@ -494,24 +495,36 @@ local function allowed(attacker: Player, model: Model, victim: Player?): boolean
 	return model:GetAttribute("Dummy") == true and attacker:GetAttribute("MatchId") == 0
 end
 
-local function validHit(origin: Vector3, dir: Vector3, part: BasePart, victim: Player?, t: number): boolean
-	local center = part.Position
-	if victim then
-		local root = victim.Character and victim.Character:FindFirstChild("HumanoidRootPart")
-		if not root then
-			return false
+-- Returns the server-checked distance to the hit, or nil if the shot could not have hit.
+-- The shooter sees other players about one network leg + interpolation in the past,
+-- so several moments in that window are tested (lag compensation).
+local function validHit(origin: Vector3, dir: Vector3, part: BasePart, victim: Player?, fireTime: number, t: number): number?
+	local root = victim and victim.Character and victim.Character:FindFirstChild("HumanoidRootPart")
+	if victim and not root then
+		return nil
+	end
+	local times = { t }
+	if root then
+		local cap = Config.Match.RewindCap
+		local fired = math.min(fireTime, t)
+		local lat = math.clamp(t - fired, 0, cap)
+		local earliest = math.max(t - 2 * lat - Config.Match.InterpDelay, t - cap)
+		times = {}
+		for i = 0, 4 do
+			table.insert(times, earliest + (fired - earliest) * i / 4)
 		end
-		center = (rootAt(victim, root, t) * root.CFrame:ToObjectSpace(part.CFrame)).Position
 	end
-	local toC = center - origin
-	local along = toC:Dot(dir)
-	if along < 0 or along > Config.Range then
-		return false
+	for _, at in times do
+		local center = root and (rootAt(victim, root, at) * root.CFrame:ToObjectSpace(part.CFrame)).Position or part.Position
+		local toC = center - origin
+		local along = toC:Dot(dir)
+		if along >= 0 and along <= Config.Range
+			and (toC - dir * along).Magnitude <= part.Size.Magnitude / 2 + 1.5
+			and workspace:Raycast(origin, dir * math.max(along - 1, 0.01), mapParams) == nil then
+			return along
+		end
 	end
-	if (toC - dir * along).Magnitude > part.Size.Magnitude / 2 + 1.5 then
-		return false
-	end
-	return workspace:Raycast(origin, dir * math.max(along - 1, 0.01), mapParams) == nil
+	return nil
 end
 
 local function damageFor(w, part: BasePart, dist: number): number
@@ -618,8 +631,14 @@ function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fir
 	if not char or player:GetAttribute(w.slot) ~= weaponId then
 		return
 	end
-	if (origin - char.Head.Position).Magnitude > 8 then
+	local head = char.Head.Position
+	if (origin - head).Magnitude > 8 then
 		return
+	end
+	-- Never let a shot start on the far side of a wall.
+	local blocked = workspace:Raycast(head, origin - head, mapParams)
+	if blocked then
+		origin = blocked.Position + blocked.Normal * 0.1
 	end
 	local t = now()
 	if (s.reloadUntil[weaponId] or 0) > t or s.ammo[weaponId] <= 0 then
@@ -636,7 +655,6 @@ function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fir
 	s.last[weaponId] = t
 	s.ammo[weaponId] -= 1
 
-	local rewindTo = math.clamp(fireTime, t - Config.Match.RewindCap, t)
 	local hits = {}
 	for i = 1, math.min(#shots, w.pellets or 1) do
 		local shot = shots[i]
@@ -648,10 +666,11 @@ function Combat.fire(player: Player, weaponId: any, origin: any, shots: any, fir
 			continue
 		end
 		local model, hum, victim = targetOf(part)
-		if model and allowed(player, model, victim) and validHit(origin, dir, part, victim, rewindTo) then
+		local along = model and allowed(player, model, victim) and validHit(origin, dir, part, victim, fireTime, t)
+		if along then
 			local h = hits[model] or { hum = hum, victim = victim, dmg = 0, head = false }
 			hits[model] = h
-			h.dmg += damageFor(w, part, (pos - origin).Magnitude)
+			h.dmg += damageFor(w, part, along) -- falloff uses the server-checked distance
 			h.head = h.head or part.Name == "Head"
 		end
 	end
@@ -707,6 +726,10 @@ function Combat.melee(player: Player, part: any)
 	if toTarget.Magnitude > w.range + 3 then
 		return
 	end
+	local head = char:FindFirstChild("Head")
+	if not head or workspace:Raycast(head.Position, part.Position - head.Position, mapParams) then
+		return -- no knifing through walls
+	end
 	local behind = toTarget.Magnitude > 0.1 and troot.CFrame.LookVector:Dot(toTarget.Unit) > 0.5
 	local dmg = behind and w.backstab or w.damage
 	local killed = Combat.applyDamage(player, model, hum, victim, dmg, id, { backstab = behind })
@@ -724,8 +747,7 @@ local function frag(attacker: Player, pos: Vector3, w)
 		local char = p.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		local torso = char and (char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
-		local selfHit = p == attacker and attacker:GetAttribute("MatchId") ~= 0
-		if hum and torso and (selfHit or Combat.canDamage(attacker, p)) then
+		if hum and torso and Combat.canDamage(attacker, p) then
 			local d = (torso.Position - pos).Magnitude
 			if d <= w.radius and not workspace:Raycast(pos, torso.Position - pos, mapParams) then
 				local dmg = d <= w.innerRadius and w.damage
@@ -797,7 +819,14 @@ function Combat.throw(player: Player, origin: any, dir: any)
 	g.Color = Config.Colors.Gold
 	g.Material = Enum.Material.Neon
 	g.CanQuery = false
-	g.CFrame = CFrame.new(origin + dir * 2)
+	-- Spawn from the server's head position, never past a wall.
+	local head = char.Head.Position
+	local spawnPos = head + dir * 2
+	local hit = workspace:Raycast(head, spawnPos - head, mapParams)
+	if hit then
+		spawnPos = hit.Position - dir * 0.5
+	end
+	g.CFrame = CFrame.new(spawnPos)
 	g.Parent = workspace
 	g:SetNetworkOwner(nil)
 	g.AssemblyLinearVelocity = dir * 70 + Vector3.new(0, 12, 0)
@@ -837,15 +866,17 @@ function Combat.start()
 	task.spawn(function()
 		while true do
 			task.wait(0.5)
+			local t = os.clock()
 			for _, player in Players:GetPlayers() do
 				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 				if root and not root.Anchored then
 					local last = lastPos[player]
-					local flat = last and (root.Position - last) * Vector3.new(1, 0, 1)
-					if flat and flat.Magnitude / 0.5 > Config.Movement.MaxAvgSpeed then
-						root.CFrame = CFrame.new(last) * root.CFrame.Rotation
+					local flat = last and (root.Position - last.pos) * Vector3.new(1, 0, 1)
+					if flat and flat.Magnitude / math.max(t - last.t, 0.5) > Config.Movement.MaxAvgSpeed then
+						root.CFrame = CFrame.new(last.pos) * root.CFrame.Rotation
+						last.t = t
 					else
-						lastPos[player] = root.Position
+						lastPos[player] = { pos = root.Position, t = t }
 					end
 				end
 			end
@@ -875,11 +906,16 @@ local Net = require(ReplicatedStorage.Shared.Net)
 
 local Data = {}
 local profiles: { [Player]: any } = {}
-local store, weekly
+local store
 pcall(function()
 	store = DataStoreService:GetDataStore("Antithesis_v1")
-	weekly = DataStoreService:GetOrderedDataStore("WeeklyWins_" .. os.time() // 604800)
 end)
+
+-- Resolved per use so a long-running server rolls over to the new week.
+local function weeklyStore()
+	local ok, s = pcall(DataStoreService.GetOrderedDataStore, DataStoreService, "WeeklyWins_" .. os.time() // 604800)
+	return ok and s or nil
+end
 
 local function today(): number
 	return os.time() // 86400
@@ -966,6 +1002,9 @@ function Data.load(player: Player)
 		end
 	end
 	p._noSave = not ok -- never overwrite real data with defaults after a failed load
+	if not player.Parent then
+		return p -- left while loading; don't keep (and keep saving) a stale profile
+	end
 	profiles[player] = p
 
 	local stats = Instance.new("Folder")
@@ -1031,6 +1070,7 @@ function Data.claimQuest(player: Player, index: any)
 end
 
 function Data.addWeeklyWin(player: Player)
+	local weekly = weeklyStore()
 	if weekly then
 		task.spawn(pcall, weekly.IncrementAsync, weekly, tostring(player.UserId), 1)
 	end
@@ -1124,6 +1164,7 @@ end)
 
 local names = {}
 local function refreshBoard(World)
+	local weekly = weeklyStore()
 	if not weekly then
 		return
 	end
@@ -1412,11 +1453,17 @@ local function spawnAll(m)
 	for t, team in m.teams do
 		for i, p in team do
 			if p.Parent and byPlayer[p] == m then
-				p:LoadCharacter()
+				local ok, err = pcall(p.LoadCharacter, p)
+				if not ok then
+					warn("[Match] LoadCharacter failed for", p.Name, err)
+					continue
+				end
+				-- LoadCharacter yields: re-check the player is still here and in this match.
 				local char = p.Character
-				if char then
+				local root = char and byPlayer[p] == m and char:FindFirstChild("HumanoidRootPart")
+				if root then
 					char:PivotTo(m.arena.spawns[t][i])
-					char.HumanoidRootPart.Anchored = true
+					root.Anchored = true
 					Combat.clear(p)
 					Combat.reset(p)
 				end
@@ -1538,9 +1585,10 @@ local function roundEnd(m, winner: number)
 end
 
 local function finish(m)
-	local winner = m.forfeit
-		or (m.score[1] >= m.cfg.winsNeeded and 1)
+	-- A decided score wins over a forfeit (someone leaving during the final round-end screen).
+	local winner = (m.score[1] >= m.cfg.winsNeeded and 1)
 		or (m.score[2] >= m.cfg.winsNeeded and 2)
+		or m.forfeit
 		or 0
 	local group = { mode = m.mode, teams = m.teams, votes = {}, expires = os.clock() + M.ResultsTime }
 	for _, p in m.players do
@@ -1566,7 +1614,7 @@ local function finish(m)
 	World.destroyArena(m.arena)
 end
 
-local function run(m)
+local function play(m)
 	while not m.over do
 		m.round += 1
 		spawnAll(m)
@@ -1583,6 +1631,14 @@ local function run(m)
 		if m.score[1] >= m.cfg.winsNeeded or m.score[2] >= m.cfg.winsNeeded then
 			break
 		end
+	end
+end
+
+-- finish always runs, even after an error, so players are never stranded in an arena.
+local function run(m)
+	local ok, err = pcall(play, m)
+	if not ok then
+		warn("[Match] match error:", err)
 	end
 	finish(m)
 end
@@ -1679,6 +1735,13 @@ function Match.onLeave(player: Player)
 	end
 	byPlayer[player] = nil
 	local team = player:GetAttribute("Team")
+	-- Leaving counts as a loss unless this player's team had already won (profile still exists here).
+	local profile = Data.get(player)
+	if profile and m.score[team] < m.cfg.winsNeeded and m.forfeit ~= team then
+		profile.matches += 1
+		profile.losses += 1
+		profile.streak = 0
+	end
 	for _, p in m.teams[team] do
 		if p ~= player and byPlayer[p] == m then
 			return
@@ -1692,7 +1755,7 @@ function Match.start()
 	Combat.canDamage = function(a, v)
 		local m = byPlayer[a]
 		return m ~= nil and m == byPlayer[v] and (m.phase == "Live" or m.phase == "Collapse")
-			and a:GetAttribute("Team") ~= v:GetAttribute("Team")
+			and (a == v or a:GetAttribute("Team") ~= v:GetAttribute("Team")) -- a == v: own frag
 	end
 	Combat.audience = function(p)
 		local m = byPlayer[p]
@@ -1897,6 +1960,7 @@ local function dummy(parent: Instance, pos: Vector3)
 	limb("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0), C.Dark)
 	limb("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0), C.Dark)
 	local hum = Instance.new("Humanoid")
+	hum.RequiresNeck = false -- anchored, unjointed limbs; otherwise the Humanoid dies on spawn
 	hum.Parent = m
 	m.PrimaryPart = root
 	m:SetAttribute("Dummy", true)
@@ -2312,8 +2376,14 @@ RunService.RenderStepped:Connect(function()
 	if fp ~= firstPerson then
 		firstPerson = fp
 		player.CameraMode = fp and Enum.CameraMode.LockFirstPerson or Enum.CameraMode.Classic
-		player.CameraMinZoomDistance = fp and 0.5 or Config.Lobby.MinZoom
-		player.CameraMaxZoomDistance = fp and 0.5 or Config.Lobby.MaxZoom
+		-- Order matters: Roblox clamps Min down to the current Max, so never write Min above Max.
+		if fp then
+			player.CameraMinZoomDistance = 0.5
+			player.CameraMaxZoomDistance = 0.5
+		else
+			player.CameraMaxZoomDistance = Config.Lobby.MaxZoom
+			player.CameraMinZoomDistance = Config.Lobby.MinZoom
+		end
 	end
 end)
 
@@ -2599,7 +2669,10 @@ function Hud.outlines()
 			local h = char:FindFirstChild("TeamOutline")
 			if myMatch ~= 0 and other:GetAttribute("MatchId") == myMatch then
 				h = h or UI.new("Highlight", { Name = "TeamOutline", FillTransparency = 1, OutlineTransparency = 0.3, Parent = char })
+				local ally = other:GetAttribute("Team") == myTeam()
 				h.OutlineColor = UI.relColor(other:GetAttribute("Team"), myTeam())
+				-- Enemies only outline where visible; allies show through walls.
+				h.DepthMode = if ally then Enum.HighlightDepthMode.AlwaysOnTop else Enum.HighlightDepthMode.Occluded
 			elseif h then
 				h:Destroy()
 			end
@@ -2639,8 +2712,9 @@ local questsPanel, questsList
 local zone: string? = nil -- lobby walk-in zone the player is standing in ("Shop" / "Quests")
 local padPill, toastLabel
 local resultsPanel, resultsTitle, resultsScore, resultsLines, unlockBar, unlockText, rematchButton
-local challengePanel, challengeText
+local challengePanel, challengeText, declineButton
 local challenger: Player? = nil
+local rematchUntil = 0
 
 local function focus(button: GuiObject)
 	if UserInputService.GamepadEnabled then
@@ -2862,6 +2936,8 @@ function Menus.results(data)
 		unlockBar.Size = UDim2.fromScale(1, 1)
 	end
 	rematchButton.Text = "REMATCH"
+	rematchButton.BackgroundColor3 = C.Ally
+	rematchUntil = os.clock() + Config.Match.ResultsTime - 0.5 -- small margin for latency
 	loadoutPanel.Visible = false
 	shopPanel.Visible = false
 	questsPanel.Visible = false
@@ -2873,6 +2949,7 @@ function Menus.challenged(from: Player)
 	challenger = from
 	challengeText.Text = from.DisplayName .. " challenges you to a 1v1"
 	challengePanel.Visible = true
+	focus(declineButton) -- a stray A press while jumping declines rather than starting a duel
 	task.delay(15, function()
 		if challenger == from then
 			challengePanel.Visible = false
@@ -3007,6 +3084,11 @@ function Menus.init(gui: ScreenGui)
 	local barBack = UI.new("Frame", { Size = UDim2.fromOffset(420, 10), BackgroundColor3 = GREY, BorderSizePixel = 0, Parent = resultsPanel })
 	unlockBar = UI.new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.Gold, BorderSizePixel = 0, Parent = barBack })
 	rematchButton = UI.button("REMATCH", { BackgroundColor3 = C.Ally, Parent = resultsPanel }, function()
+		if os.clock() > rematchUntil then
+			rematchButton.Text = "REMATCH EXPIRED"
+			rematchButton.BackgroundColor3 = GREY
+			return
+		end
 		rematchButton.Text = "WAITING..."
 		Net.Event:FireServer("Rematch")
 	end)
@@ -3027,7 +3109,7 @@ function Menus.init(gui: ScreenGui)
 	UI.button("ACCEPT", { Position = UDim2.fromOffset(20, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = C.Good, Parent = challengePanel }, function()
 		reply(true)
 	end)
-	UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
+	declineButton = UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
 		reply(false)
 	end)
 
@@ -3471,7 +3553,8 @@ local function shoot(id: string, w)
 	for i = 1, w.pellets or 1 do
 		local dir = cone(camera.CFrame.LookVector, spread)
 		local hit = workspace:Raycast(origin, dir * Config.Range, params)
-		shots[i] = { dir, hit and hit.Instance, hit and hit.Position or origin + dir * Config.Range }
+		-- false, not nil: nil holes are dropped when a table is sent through a RemoteEvent
+		shots[i] = { dir, hit and hit.Instance or false, hit and hit.Position or origin + dir * Config.Range }
 	end
 	Net.Event:FireServer("Fire", id, origin, shots, workspace:GetServerTimeNow(), State.scoped)
 	lastShotAt = os.clock()
@@ -3507,8 +3590,17 @@ local function tryFire()
 		swing = 1
 		UI.sound(Config.Sounds.Melee, 1, 0.5)
 		params.FilterDescendantsInstances = { player.Character, camera }
-		local hit = workspace:Spherecast(camera.CFrame.Position, 1.5, camera.CFrame.LookVector * w.range, params)
-		if hit then
+		local origin, reach = camera.CFrame.Position, camera.CFrame.LookVector * w.range
+		local function isTarget(r)
+			local m = r and r.Instance:FindFirstAncestorOfClass("Model")
+			return m ~= nil and m:FindFirstChildOfClass("Humanoid") ~= nil
+		end
+		-- Ray first: Spherecast skips parts already inside its starting sphere (point-blank targets).
+		local hit = workspace:Raycast(origin, reach, params)
+		if not isTarget(hit) then
+			hit = workspace:Spherecast(origin, 1.5, reach, params)
+		end
+		if isTarget(hit) then
 			Net.Event:FireServer("Melee", hit.Instance)
 		end
 		return
@@ -3566,6 +3658,9 @@ local function render(dt: number)
 		end
 		buildViewmodel()
 		Net.Event:FireServer("Equip", holding and State.slot or 0)
+	end
+	if not holding then
+		State.ads = false -- right-drag to turn the lobby camera must not slow walking
 	end
 	local id = equippedId()
 	local w = Config.Weapons[id or ""]
@@ -3667,13 +3762,18 @@ function Weapons.init()
 	if player.Character then
 		task.spawn(onCharacter, player.Character)
 	end
-	for _, attr in { "Primary", "Secondary", "Melee", "Utility", "Palette" } do
+	for _, attr in { "Primary", "Secondary", "Melee", "Utility" } do
 		player:GetAttributeChangedSignal(attr):Connect(function()
 			if player.Character then
 				refresh()
 			end
 		end)
 	end
+	-- A new skin only changes the model; ammo stays in sync with the server.
+	player:GetAttributeChangedSignal("Palette"):Connect(function()
+		buildViewmodel()
+		Net.Event:FireServer("Equip", State.holding and State.slot or 0)
+	end)
 end
 
 return Weapons

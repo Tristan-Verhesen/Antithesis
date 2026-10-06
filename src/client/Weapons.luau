@@ -115,7 +115,8 @@ local function shoot(id: string, w)
 	for i = 1, w.pellets or 1 do
 		local dir = cone(camera.CFrame.LookVector, spread)
 		local hit = workspace:Raycast(origin, dir * Config.Range, params)
-		shots[i] = { dir, hit and hit.Instance, hit and hit.Position or origin + dir * Config.Range }
+		-- false, not nil: nil holes are dropped when a table is sent through a RemoteEvent
+		shots[i] = { dir, hit and hit.Instance or false, hit and hit.Position or origin + dir * Config.Range }
 	end
 	Net.Event:FireServer("Fire", id, origin, shots, workspace:GetServerTimeNow(), State.scoped)
 	lastShotAt = os.clock()
@@ -151,8 +152,17 @@ local function tryFire()
 		swing = 1
 		UI.sound(Config.Sounds.Melee, 1, 0.5)
 		params.FilterDescendantsInstances = { player.Character, camera }
-		local hit = workspace:Spherecast(camera.CFrame.Position, 1.5, camera.CFrame.LookVector * w.range, params)
-		if hit then
+		local origin, reach = camera.CFrame.Position, camera.CFrame.LookVector * w.range
+		local function isTarget(r)
+			local m = r and r.Instance:FindFirstAncestorOfClass("Model")
+			return m ~= nil and m:FindFirstChildOfClass("Humanoid") ~= nil
+		end
+		-- Ray first: Spherecast skips parts already inside its starting sphere (point-blank targets).
+		local hit = workspace:Raycast(origin, reach, params)
+		if not isTarget(hit) then
+			hit = workspace:Spherecast(origin, 1.5, reach, params)
+		end
+		if isTarget(hit) then
 			Net.Event:FireServer("Melee", hit.Instance)
 		end
 		return
@@ -210,6 +220,9 @@ local function render(dt: number)
 		end
 		buildViewmodel()
 		Net.Event:FireServer("Equip", holding and State.slot or 0)
+	end
+	if not holding then
+		State.ads = false -- right-drag to turn the lobby camera must not slow walking
 	end
 	local id = equippedId()
 	local w = Config.Weapons[id or ""]
@@ -311,13 +324,18 @@ function Weapons.init()
 	if player.Character then
 		task.spawn(onCharacter, player.Character)
 	end
-	for _, attr in { "Primary", "Secondary", "Melee", "Utility", "Palette" } do
+	for _, attr in { "Primary", "Secondary", "Melee", "Utility" } do
 		player:GetAttributeChangedSignal(attr):Connect(function()
 			if player.Character then
 				refresh()
 			end
 		end)
 	end
+	-- A new skin only changes the model; ammo stays in sync with the server.
+	player:GetAttributeChangedSignal("Palette"):Connect(function()
+		buildViewmodel()
+		Net.Event:FireServer("Equip", State.holding and State.slot or 0)
+	end)
 end
 
 return Weapons

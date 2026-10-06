@@ -274,7 +274,10 @@ function Hud.outlines()
 			local h = char:FindFirstChild("TeamOutline")
 			if myMatch ~= 0 and other:GetAttribute("MatchId") == myMatch then
 				h = h or UI.new("Highlight", { Name = "TeamOutline", FillTransparency = 1, OutlineTransparency = 0.3, Parent = char })
+				local ally = other:GetAttribute("Team") == myTeam()
 				h.OutlineColor = UI.relColor(other:GetAttribute("Team"), myTeam())
+				-- Enemies only outline where visible; allies show through walls.
+				h.DepthMode = if ally then Enum.HighlightDepthMode.AlwaysOnTop else Enum.HighlightDepthMode.Occluded
 			elseif h then
 				h:Destroy()
 			end
