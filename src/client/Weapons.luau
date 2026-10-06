@@ -224,7 +224,7 @@ local function render(dt: number)
 	if not holding then
 		State.ads = false -- right-drag to turn the lobby camera must not slow walking
 	end
-	local id = equippedId()
+	local id = holding and equippedId() or nil -- lobby hall is weapon-free: no weapon speed/ammo/HUD
 	local w = Config.Weapons[id or ""]
 	local wantAds = State.ads and w ~= nil and w.adsFov ~= nil and canAct()
 	adsAlpha += ((wantAds and 1 or 0) - adsAlpha) * math.min(dt * 18, 1)

@@ -161,7 +161,14 @@ end
 
 function Data.claimQuest(player: Player, index: any)
 	local p = profiles[player]
-	local entry = p and type(index) == "number" and p.quests[index]
+	if not p then
+		return
+	end
+	if p.questDay ~= today() then
+		Data.push(player) -- the day rolled over since the client's list: roll, resend, drop the stale click
+		return
+	end
+	local entry = type(index) == "number" and p.quests[index]
 	local q = entry and questById[entry.id]
 	if not q or entry.claimed or entry.progress < q.goal then
 		return
@@ -287,6 +294,19 @@ local function refreshBoard(World)
 end
 
 function Data.start(World)
+	-- At the UTC day change, resend every profile once so lobby players see their new quests.
+	task.spawn(function()
+		local day = today()
+		while true do
+			task.wait(30)
+			if today() ~= day then
+				day = today()
+				for player in profiles do
+					Data.push(player)
+				end
+			end
+		end
+	end)
 	task.spawn(function()
 		while true do
 			refreshBoard(World)

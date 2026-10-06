@@ -77,9 +77,12 @@ local function validHit(origin: Vector3, dir: Vector3, part: BasePart, victim: P
 	end
 	local times = { t }
 	if root then
+		if fireTime ~= fireTime then
+			return nil -- NaN
+		end
 		local cap = Config.Match.RewindCap
-		local fired = math.min(fireTime, t)
-		local lat = math.clamp(t - fired, 0, cap)
+		local fired = math.clamp(fireTime, t - cap, t)
+		local lat = t - fired
 		local earliest = math.max(t - 2 * lat - Config.Match.InterpDelay, t - cap)
 		times = {}
 		for i = 0, 4 do
@@ -130,6 +133,7 @@ function Combat.applyDamage(attacker: Player?, model: Model, hum: Humanoid, vict
 	end
 	amount = math.floor(amount + 0.5)
 	local lethal = amount >= hum.Health
+	local dealt = math.min(amount, math.ceil(hum.Health)) -- health actually removed (no overkill)
 	if model:GetAttribute("Dummy") then
 		hum.Health = lethal and hum.MaxHealth or hum.Health - amount
 	else
@@ -137,7 +141,7 @@ function Combat.applyDamage(attacker: Player?, model: Model, hum: Humanoid, vict
 	end
 	if victim then
 		if attacker then
-			Combat.onDamage(attacker, victim, amount)
+			Combat.onDamage(attacker, victim, dealt)
 		end
 		local root = attacker and attacker.Character and attacker.Character:FindFirstChild("HumanoidRootPart")
 		Net.Event:FireClient(victim, "Damaged", root and root.Position)

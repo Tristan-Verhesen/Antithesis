@@ -23,13 +23,29 @@ local questsPanel, questsList
 local zone: string? = nil -- lobby walk-in zone the player is standing in ("Shop" / "Quests")
 local padPill, toastLabel
 local resultsPanel, resultsTitle, resultsScore, resultsLines, unlockBar, unlockText, rematchButton
-local challengePanel, challengeText, declineButton
+local challengePanel, challengeText, acceptButton, declineButton
 local challenger: Player? = nil
+local challengeSeq, toastSeq = 0, 0
 local rematchUntil = 0
 
-local function focus(button: GuiObject)
-	if UserInputService.GamepadEnabled then
+local function usingGamepad(): boolean
+	return string.sub(UserInputService:GetLastInputType().Name, 1, 7) == "Gamepad"
+end
+
+local function focus(button: GuiObject?)
+	if button and usingGamepad() then
 		GuiService.SelectedObject = button
+	end
+end
+
+-- Rebuilding a list destroys the selected button; move gamepad selection to the same-named new one.
+local function keepSelection(container: Instance, build: () -> ())
+	local sel = GuiService.SelectedObject
+	local key = if sel and sel:IsDescendantOf(container) then sel.Name else nil
+	build()
+	if key then
+		local again = container:FindFirstChild(key, true)
+		GuiService.SelectedObject = if again and again:IsA("GuiButton") then again else container:FindFirstChildWhichIsA("GuiButton", true)
 	end
 end
 
@@ -47,7 +63,7 @@ end
 
 ---------------------------------------------------------------- loadout
 
-local function buildLoadout()
+local function buildLoadoutNow()
 	clear(loadoutRows)
 	local p = State.profile
 	if not p then
@@ -63,6 +79,7 @@ local function buildLoadout()
 			local owned = p.unlocked[id] == true
 			local selected = player:GetAttribute(slot) == id
 			UI.button(string.upper(id) .. "\n" .. (owned and w.class or ("LOCKED - " .. w.price)), {
+				Name = slot .. ":" .. id,
 				Size = UDim2.fromOffset(118, 56),
 				TextSize = 14,
 				TextWrapped = true,
@@ -83,9 +100,13 @@ local function buildLoadout()
 	end
 end
 
+local function buildLoadout()
+	keepSelection(loadoutRows, buildLoadoutNow)
+end
+
 ---------------------------------------------------------------- shop
 
-local function buildShop()
+local function buildShopNow()
 	clear(shopList)
 	local p = State.profile
 	if not p then
@@ -101,6 +122,7 @@ local function buildShop()
 		UI.label({ Text = status, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -148, 0.5, 0), Size = UDim2.fromOffset(140, 24), TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = C.Gold, Parent = r })
 		if buttonText then
 			UI.button(buttonText, {
+				Name = name,
 				AnchorPoint = Vector2.new(1, 0.5),
 				Position = UDim2.new(1, -8, 0.5, 0),
 				Size = UDim2.fromOffset(130, 36),
@@ -137,6 +159,10 @@ local function buildShop()
 	end
 end
 
+local function buildShop()
+	keepSelection(shopList, buildShopNow)
+end
+
 ---------------------------------------------------------------- quests
 
 local questById = {}
@@ -155,7 +181,7 @@ local function claimable(): number
 	return n
 end
 
-local function buildQuests()
+local function buildQuestsNow()
 	clear(questsList)
 	local p = State.profile
 	if not p then
@@ -172,6 +198,7 @@ local function buildQuests()
 			UI.new("Frame", { Size = UDim2.fromScale(math.clamp(entry.progress / q.goal, 0, 1), 1), BackgroundColor3 = done and C.Good or C.Ally, BorderSizePixel = 0, Parent = back })
 			UI.label({ Text = entry.progress .. " / " .. q.goal, Position = UDim2.fromOffset(14, 50), Size = UDim2.fromOffset(200, 16), TextXAlignment = Enum.TextXAlignment.Left, TextSize = 13, Parent = r })
 			UI.button(entry.claimed and "CLAIMED" or "CLAIM", {
+				Name = "Q" .. i,
 				AnchorPoint = Vector2.new(1, 0.5),
 				Position = UDim2.new(1, -10, 0.5, 0),
 				Size = UDim2.fromOffset(130, 40),
@@ -185,6 +212,10 @@ local function buildQuests()
 			end)
 		end
 	end
+end
+
+local function buildQuests()
+	keepSelection(questsList, buildQuestsNow)
 end
 
 ---------------------------------------------------------------- public
@@ -216,7 +247,7 @@ function Menus.phase(ph)
 		shopPanel.Visible = false
 		questsPanel.Visible = false
 		resultsPanel.Visible = false
-		challengePanel.Visible = false
+		Menus.closeChallenge()
 	end
 end
 
@@ -256,54 +287,92 @@ function Menus.results(data)
 	focus(rematchButton)
 end
 
+function Menus.closeChallenge()
+	challenger = nil
+	challengePanel.Visible = false
+	ContextActionService:UnbindAction("ChallengeReply")
+	local sel = GuiService.SelectedObject
+	if sel and sel:IsDescendantOf(challengePanel) then
+		GuiService.SelectedObject = nil
+	end
+end
+
+local function replyChallenge(accept: boolean)
+	if challenger then
+		Net.Event:FireServer("ChallengeReply", challenger, accept)
+	end
+	Menus.closeChallenge()
+end
+
+-- An unsolicited popup must not take gamepad selection (the stick would stop moving the character),
+-- so gamepad players answer with D-pad Up / Down instead.
 function Menus.challenged(from: Player)
+	challengeSeq += 1
+	local my = challengeSeq
 	challenger = from
 	challengeText.Text = from.DisplayName .. " challenges you to a 1v1"
+	local pad = UserInputService.GamepadEnabled
+	acceptButton.Text = pad and "ACCEPT [D-PAD UP]" or "ACCEPT"
+	declineButton.Text = pad and "DECLINE [D-PAD DOWN]" or "DECLINE"
 	challengePanel.Visible = true
-	focus(declineButton) -- a stray A press while jumping declines rather than starting a duel
+	ContextActionService:BindActionAtPriority("ChallengeReply", function(_, inputState, input)
+		if inputState == Enum.UserInputState.Begin then
+			replyChallenge(input.KeyCode == Enum.KeyCode.DPadUp)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, 3000, Enum.KeyCode.DPadUp, Enum.KeyCode.DPadDown)
 	task.delay(15, function()
-		if challenger == from then
-			challengePanel.Visible = false
-			challenger = nil
+		if challengeSeq == my then
+			Menus.closeChallenge()
 		end
 	end)
 end
 
 function Menus.toast(text: string)
+	toastSeq += 1
+	local my = toastSeq
 	toastLabel.Text = text
 	toastLabel.Visible = true
 	task.delay(3, function()
-		if toastLabel.Text == text then
+		if toastSeq == my then
 			toastLabel.Visible = false
 		end
 	end)
 end
 
--- Lobby panels: only one open at a time. show = nil toggles.
-local function setPanel(name: string, show: boolean?)
+-- Lobby panels: only one open at a time. show = nil toggles; show = false closes just this panel.
+-- explicit = opened by a button/key press (only then does a gamepad player get UI selection).
+local function setPanel(name: string, show: boolean?, explicit: boolean?)
 	if State.phase then
 		return
 	end
 	local panels = { Loadout = loadoutPanel, Shop = shopPanel, Quests = questsPanel }
 	local target = panels[name]
+	if show == false then
+		target.Visible = false
+		return
+	end
 	local visible = if show == nil then not target.Visible else show
 	for key, panel in panels do
 		panel.Visible = key == name and visible
 	end
 	if visible then
+		resultsPanel.Visible = false
 		if name == "Loadout" then
 			buildLoadout()
-			focus(doneButton)
 		elseif name == "Shop" then
 			buildShop()
 		else
 			buildQuests()
 		end
+		if explicit then
+			focus(if name == "Loadout" then doneButton else target:FindFirstChildWhichIsA("GuiButton", true))
+		end
 	end
 end
 
 local function openLoadout()
-	setPanel("Loadout")
+	setPanel("Loadout", nil, true)
 end
 
 function Menus.init(gui: ScreenGui)
@@ -313,10 +382,10 @@ function Menus.init(gui: ScreenGui)
 	coinsLabel = UI.label({ Text = "", TextColor3 = C.Gold, Size = UDim2.fromOffset(200, 24), TextStrokeTransparency = 0.5, Parent = sideBar })
 	UI.button("LOADOUT [M]", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Ally, Parent = sideBar }, openLoadout)
 	UI.button("SHOP", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Gold, Parent = sideBar }, function()
-		setPanel("Shop")
+		setPanel("Shop", nil, true)
 	end)
 	questsButton = UI.button("QUESTS", { Size = UDim2.fromOffset(200, 48), BackgroundColor3 = C.Good, Parent = sideBar }, function()
-		setPanel("Quests")
+		setPanel("Quests", nil, true)
 	end)
 	local fovRow = UI.new("Frame", { Size = UDim2.fromOffset(200, 40), BackgroundTransparency = 1, Parent = sideBar })
 	local function fov(delta: number)
@@ -410,18 +479,11 @@ function Menus.init(gui: ScreenGui)
 	-- Challenge
 	challengePanel = UI.panel({ Size = UDim2.fromOffset(400, 150), Position = UDim2.fromScale(0.5, 0.25), Parent = gui })
 	challengeText = UI.label({ Position = UDim2.fromOffset(10, 14), Size = UDim2.new(1, -20, 0, 40), TextSize = 20, TextWrapped = true, Parent = challengePanel })
-	local function reply(accept: boolean)
-		if challenger then
-			Net.Event:FireServer("ChallengeReply", challenger, accept)
-		end
-		challenger = nil
-		challengePanel.Visible = false
-	end
-	UI.button("ACCEPT", { Position = UDim2.fromOffset(20, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = C.Good, Parent = challengePanel }, function()
-		reply(true)
+	acceptButton = UI.button("ACCEPT", { Position = UDim2.fromOffset(20, 80), Size = UDim2.fromOffset(170, 48), TextSize = 15, BackgroundColor3 = C.Good, Parent = challengePanel }, function()
+		replyChallenge(true)
 	end)
-	declineButton = UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
-		reply(false)
+	declineButton = UI.button("DECLINE", { Position = UDim2.fromOffset(210, 80), Size = UDim2.fromOffset(170, 48), TextSize = 15, BackgroundColor3 = GREY, TextColor3 = C.Light, Parent = challengePanel }, function()
+		replyChallenge(false)
 	end)
 
 	ContextActionService:BindAction("Menu", function(_, inputState)

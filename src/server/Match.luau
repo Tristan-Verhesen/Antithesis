@@ -370,6 +370,12 @@ function Match.onLeave(player: Player)
 		profile.matches += 1
 		profile.losses += 1
 		profile.streak = 0
+	elseif profile then
+		-- Team already won (final round-end screen): credit now, finish() skips players who left.
+		local st = m.stats[player]
+		Data.questProgress(player, "matches", 1)
+		Data.questProgress(player, "wins", 1)
+		Data.reward(player, true, st.roundsWon > 0 or st.damage >= Config.Rewards.MinDamage, st.banners)
 	end
 	for _, p in m.teams[team] do
 		if p ~= player and byPlayer[p] == m then

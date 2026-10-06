@@ -20,6 +20,11 @@
       },
       "$properties": {
         "GameSettingsAvatar": "R6"
+      },
+      "StarterCharacterScripts": {
+        "Health": {
+          "$className": "Script"
+        }
       }
     },
     "Lighting": {

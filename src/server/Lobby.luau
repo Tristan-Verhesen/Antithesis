@@ -13,7 +13,8 @@ local L = Config.Lobby
 local lastStatus: { [Player]: string } = {}
 local teleportReady: { [Player]: number } = {}
 
-local function standingOn(player: Player, center: Vector3): boolean
+-- maxY: how far above the pad still counts (higher for players already on it, so jumping doesn't drop them).
+local function standingOn(player: Player, center: Vector3, maxY: number?): boolean
 	if Match.busy(player) then
 		return false
 	end
@@ -24,11 +25,11 @@ local function standingOn(player: Player, center: Vector3): boolean
 		return false
 	end
 	local offset = root.Position - center
-	return offset.Y > -1 and offset.Y < 8 and Vector2.new(offset.X, offset.Z).Magnitude <= L.PadRadius
+	return offset.Y > -1 and offset.Y < (maxY or 8) and Vector2.new(offset.X, offset.Z).Magnitude <= L.PadRadius
 end
 
-local function onPad(player: Player, pad): boolean
-	return standingOn(player, pad.center)
+local function onPad(player: Player, pad, maxY: number?): boolean
+	return standingOn(player, pad.center, maxY)
 end
 
 -- Range teleport pads: lobby arm <-> separate firing range room.
@@ -68,13 +69,15 @@ local function tick()
 
 	for _, station in World.stations do
 		-- Keep players who are still standing on their pad, then fill free spots in arrival order.
+		local changed = false
 		for _, pad in station.pads do
 			for i = #pad.occupants, 1, -1 do
 				local p = pad.occupants[i]
-				if p.Parent and not seen[p] and onPad(p, pad) then
+				if p.Parent and not seen[p] and onPad(p, pad, 14) then
 					seen[p] = station
 				else
 					table.remove(pad.occupants, i)
+					changed = true -- someone left: a running countdown is void even if the spot refills now
 				end
 			end
 		end
@@ -94,10 +97,11 @@ local function tick()
 		for _, pad in station.pads do
 			count += #pad.occupants
 		end
+		if changed or count ~= needed then
+			station.startsAt = nil
+		end
 		if count == needed then
 			station.startsAt = station.startsAt or now + L.PadCountdown
-		else
-			station.startsAt = nil
 		end
 
 		local left = station.startsAt and math.max(0, math.ceil(station.startsAt - now))
