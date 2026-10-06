@@ -1,7 +1,7 @@
 # ANTITHESIS — Game Design Pitch
 
-> **Every loadout has an answer.**
-> A first-person 1v1 and 2v2 round-based arena shooter for Roblox. After each round, the winner locks in their loadout and it is shown to the loser. The loser then picks a loadout to counter it.
+> **Step on a pad. First to 5.**
+> A Rivals-style 1v1 and 2v2 arena shooter for Roblox. Players queue by standing on pads in a third-person lobby, then fight one-life rounds in first person until one side wins 5.
 
 Units: studs and seconds. All numbers are launch values and live in one tuning module (`src/shared/Config.luau`) so they can be patched without touching game code.
 
@@ -12,13 +12,13 @@ Units: studs and seconds. All numbers are launch values and live in one tuning m
 | Decision | Choice |
 |---|---|
 | **Name** | Antithesis |
-| **Core hook** | **Counter-Pick**: round winner locks first and their loadout is revealed; the loser picks after seeing it |
-| **Loadouts** | Chosen before every round from weapons the player has unlocked |
+| **Core hook** | **Pad matchmaking + first-to-5 duels** (Rivals-style): stand on a pad; when the opposite pad fills, a 5s countdown sends everyone to an arena built for that match |
+| **Loadouts** | Chosen in the lobby from unlocked weapons, then locked for the whole match |
 | **Unlocks** | Weapons cost **Coins**. Coins are earned from battles only and can never be bought with Robux |
-| **Camera** | First-person only |
-| **Modes at launch** | 1v1 and 2v2 |
+| **Camera** | Third person in the lobby hall; first person in matches and the firing range |
+| **Modes at launch** | 1v1 and 2v2, all casual. Ranked comes later |
 | **Platform priority** | PC-first competitive. Mobile and console are supported but secondary |
-| **Art** | "Contrast" low-poly: matte white/graphite with cyan vs orange |
+| **Art** | Lobby: dark sci-fi hall with neon trims. Arenas: "Contrast" low-poly, matte white/graphite with cyan vs orange |
 | **Monetization** | Cosmetic only. No loot boxes, no paid Coins, no stat items |
 | **Team** | Solo dev, new to Studio. Claude writes the Luau, synced with **Rojo** |
 | **Timeline** | As soon as possible, so this doc is scoped to a lean MVP. Everything else is marked **Later** |
@@ -28,31 +28,25 @@ Units: studs and seconds. All numbers are launch values and live in one tuning m
 ## 1. Core Hook & Differentiator
 
 ### 1.1 Elevator Pitch
-*A one-life-per-round duel shooter. Each round you either hold your ground or find the counter. Lose a round and you see exactly what beat you, then pick the answer.*
+*Walk onto a pad, wait for someone to step on the other one, and five seconds later you're in a first-person duel. One life per round, first to 5.*
 
-### 1.2 Counter-Pick (the Thesis → Antithesis rule)
-1. **Round 1:** both sides pick blind and at the same time.
-2. **Every round after:**
-   - The round winner's loadout is the **Thesis**. Its default is "Keep", so a winner who does nothing locks in automatically.
-   - Once it locks, a full-screen **reveal card** shows it to the loser.
-   - The loser then builds the **Antithesis**: any loadout from their own unlocks.
-3. **2v2:** the winning team's loadouts are both revealed, and the losing team picks after seeing them.
-4. **Draw:** both sides pick blind again.
-5. **Counter hints:** after the reveal, the pick screen highlights 1–2 suggested counters, so new players learn the matchups (see §2.4).
+### 1.2 Pad Matchmaking (Rivals-style)
+1. The lobby hall has **6 pad stations**: 4 for 1v1 and 2 for 2v2. Each station has a cyan pad and an orange pad, with a wall board above each showing `count/size`.
+2. Stand on a pad to join that side. When both pads are full, a **5-second countdown** runs on the boards and on your screen. Stepping off cancels it.
+3. At zero, everyone on the station goes into a **new arena built for that match**, so stations never wait for a free arena.
+4. After the match: results, coins, a 10-second **rematch** vote, then back to the lobby.
+5. Players can also challenge someone directly: hold **E** near them for a private 1v1.
 
 Why it works:
-- **Built-in comeback.** The loser always has more information than the winner.
-- **The meta can't settle.** Any comfort weapon gets countered as soon as you win with it.
-- **Easy to learn.** No economy, no heroes, no abilities. It's "see their weapon, pick the answer."
-- **Clip moment.** The reveal card followed by an instant counter-kill reads clearly in a 10-second Short.
+- **No menus to start playing.** Walking onto a pad is the whole queue, and everyone can see who is waiting.
+- **Social by default.** Players gather around the stations, watch each other queue and call each other out.
+- **Short sessions.** One-life rounds keep a first-to-5 duel at about 4–5 minutes.
 
 ### 1.3 Versus the Market
-
-| | *Rivals*-style loadout duels | *Arsenal*-style gun game | **Antithesis** |
-|---|---|---|---|
-| Loadout | Picked once, often one comfort weapon | Random forced cycling | **Re-picked every round, with information** |
-| Comeback mechanic | None | None | Loser counter-picks |
-| Unlock path | Mixed | Play-based | Coins from battles only, never sold |
+The queue flow and first-to-5 format match what *Rivals* players already know. What's different:
+- A **Collapse ring** in overtime pulls both sides to the center, so rounds never stall.
+- **Coins are earned from battles only** and are never sold for Robux.
+- Bright low-poly arenas and a **Shorts-safe HUD** make raw recordings clip-ready.
 
 ### 1.4 Aesthetic: "Contrast"
 - **Surfaces:** matte low-poly in two neutrals, off-white `#E8E6E1` and graphite `#2B2D31`. Everything uses part color + SmoothPlastic, with almost no textures. This is the cheapest style to build alone and the fastest to render.
@@ -61,6 +55,7 @@ Why it works:
 - **Enemy rim:** a `Highlight` outline (FillTransparency 1, OutlineTransparency 0.4) on enemies, so dark avatar outfits can't camouflage.
 - **No gore:** eliminated players shatter into low-poly shards in their team color.
 - **Skins:** because weapons are built from colored parts, **a skin is just a palette swap**. New skins are nearly free to produce.
+- **Lobby:** a dark sci-fi hall (graphite metal, purple and gold neon trims, glowing pad rings) that contrasts with the bright arenas.
 
 ---
 
@@ -126,13 +121,13 @@ Loadout = **1 Primary + 1 Secondary + 1 Melee + 1 Utility**.
 | **Veil** (Smoke) | 1 | 11-stud sphere for 7s | 250 |
 | **Crack** (Frag) | 1 | 2.4s fuse. 100 within 3 studs → 25 at 10 studs. Self-damage on | 400 |
 
-**Total unlock cost: 2,100 Coins, about 5 hours of play.** The starter set covers close and mid range, so counter-picking works from the first match.
+**Total unlock cost: 2,100 Coins, about 5 hours of play.** The starter set covers close and mid range, so new players have a real option at both from their first match.
 
 **Later:** Quarrel (crossbow) and Kickback (rocket launcher), which are projectile weapons; Vow (katana lunge); Flicker (machine pistol); Spring (jump pad).
 
-### 2.4 Counter Matrix (drives the pick-screen hints)
+### 2.4 Weapon Matchups (balance reference)
 
-| Thesis (winner) carries | Suggested Antithesis | Why |
+| Opponent uses | Good answer | Why |
 |---|---|---|
 | Meridian | Veil + Hornet or Breaker | Smoke kills the sightline; the sniper moves slowly and loses up close |
 | Breaker | Paragon or Triad + Crack | Out-range it; the frag flushes the corners it holds |
@@ -149,36 +144,33 @@ Arenas mix **one long lane, one mid lane and one close-quarters route**, so ever
 
 | Phase | 1v1 | 2v2 |
 |---|---|---|
-| Pick, Round 1 (blind, simultaneous) | 12s | 12s |
-| Pick, later rounds | Thesis lock **5s** → reveal → Antithesis **7s** | Same |
+| Pad countdown (lobby, before the match) | 5s | 5s |
 | Countdown (frozen, can look) | 3s | 3s |
 | Live | **60s** | **75s** |
 | Collapse (overtime) | 15s: ring shrinks to an 8-stud radius at center, 20 HP/s outside | Same |
 | Round end | 3s | 3s |
 
-If a winner presses Ready or keeps their loadout, the Thesis phase ends early.
-
 **Round resolution**
 1. The last side with a living player wins.
 2. If both sides survive Collapse, higher total HP wins.
-3. An exact tie is a **Draw**: the round is replayed with blind picks.
+3. An exact tie is a **Draw**: the round is replayed.
 
 **Formats**
 
 | Mode | Win condition | Avg. length | Ship |
 |---|---|---|---|
-| **Duel 1v1** (casual) | First to 3 | ~3 min | MVP |
-| **Doubles 2v2** (casual, solo or duo queue) | First to 3 | ~4 min | MVP |
-| **Call-Out** (challenge a lobby player) | First to 3 / 5 / 7 | — | MVP |
-| **Ranked 1v1** | First to 5 | ~5 min | Later (v1.1) |
+| **Duel 1v1** (casual, 4 pad stations) | First to 5 | ~5 min | MVP |
+| **Doubles 2v2** (casual, 2 pad stations) | First to 5 | ~6 min | MVP |
+| **Call-Out** (hold E near a lobby player) | First to 5 | ~5 min | MVP |
+| **Ranked 1v1** (separate pad row) | First to 5 | ~5 min | Later (v1.1) |
 
-**Ranked unlocks once a player owns every weapon (~5 hours)**, so nobody in Ranked is missing counter options.
+**Ranked unlocks once a player owns every weapon (~5 hours)**, so nobody in Ranked is missing weapons.
 
-**Arenas at launch (2)**
+**Arenas at launch (2, one picked at random for each match)**
 
 | Arena | Size | Identity |
 |---|---|---|
-| **Fulcrum** | ~90 × 60 | Three clear lanes (long / mid / close), central bridge. Teaches counter-picking |
+| **Fulcrum** | ~90 × 60 | Three clear lanes (long / mid / close), central bridge. Every primary has a lane where it wins |
 | **Mirrorline** | ~120 × 90, 2 floors | Vertical mid-range. Slide routes and stair peeks |
 
 ### 2.6 Audio & Visual Feedback
@@ -191,14 +183,13 @@ If a winner presses Ready or keeps their loadout, the Thesis phase ends early.
 | Headshot kill | 2° FOV punch for 80 ms | Crunch + ding | MVP |
 | Taking damage | Directional edge flash, 0.5s | Muffled impact | MVP |
 | Low HP (< 30) | 40% desaturation | Heartbeat | MVP |
-| **Thesis reveal** | Full-screen card slam showing the winner's loadout | Heavy "lock" stamp | MVP |
 | Round win | Center banner | 1.2s stinger | MVP |
 | **Final Frame** | 2.5s slow-mo replay of the round-deciding kill | — | Later (v1.1) |
 
-**Banners** (+5 Coins each, to reward flashy play): `FLAWLESS` (round won at 100 HP), `NO-SCOPE`, `CLUTCH 1v2`, `DOUBLE` (2v2), `COUNTERED` (you won the round right after picking against a revealed Thesis).
+**Banners** (+5 Coins each, to reward flashy play): `FLAWLESS` (round won at 100 HP), `NO-SCOPE`, `CLUTCH 1v2`, `DOUBLE` (2v2).
 
 **Shorts-safe HUD:**
-- Crosshair, hit markers, banners and the reveal card stay in the **center 31%** of screen width. That survives a 9:16 crop of a 16:9 recording.
+- Crosshair, hit markers and banners stay in the **center 31%** of screen width. That survives a 9:16 crop of a 16:9 recording.
 - Killfeed (top-center), score, HP and ammo (bottom-center) stay in the **center 56%**, which survives a 1:1 crop.
 
 ---
@@ -215,7 +206,7 @@ If a winner presses Ready or keeps their loadout, the Thesis phase ends early.
 | Shift | Dash | G | Utility |
 | F | Inspect | Tab | Scoreboard |
 
-- Custom first-person camera with `MouseBehavior.LockCenter` and no mouse smoothing.
+- Third-person camera in the lobby hall (zoom 8–20 studs). Locked first person in matches and the firing range, so shots always go to the crosshair.
 - Sensitivity from 0.05 to 5.00 (type-in field) plus a separate ADS multiplier.
 - FOV slider from 70 to 90 (Roblox FOV is vertical).
 - All keys rebindable. Full crosshair editor (shape, color, gap, outline), always free.
@@ -239,9 +230,9 @@ If a winner presses Ready or keeps their loadout, the Thesis phase ends early.
 ### 4.1 First Session
 | Time | Beat |
 |---|---|
-| 0s | Spawn in the lobby **firing range** (target dummies). The starter loadout is equipped |
-| ~20s | One prompt: "Press Q / tap Duel to queue." Players can keep shooting dummies while they wait |
-| First match | A 5s card explains Counter-Pick. **Newcomer pool:** players with fewer than 10 matches are paired together when possible |
+| 0s | Spawn in the lobby hall in third person, facing the pad stations and the firing range door |
+| ~10s | The wall sign reads "STAND ON A PAD TO QUEUE". Glowing pads and live `0/1` boards show where to go |
+| First match | The top of the screen shows "FIRST TO 5" and the arena name during the first countdown |
 | ~4 matches | First unlock (Hornet, 150 Coins). Unlocks are the first progression hook |
 
 ### 4.2 Session Loop (3 minutes → 45)
@@ -256,19 +247,18 @@ If a winner presses Ready or keeps their loadout, the Thesis phase ends early.
 
 | System | Spec | Ship |
 |---|---|---|
-| **Duel Rating** | Hidden Elo (K=32) on every 1v1, used to pair players within the server | MVP |
 | **Weekly Wins board** | In-lobby leaderboard (top 10, `OrderedDataStore`, resets Monday) | MVP |
 | **Ranked tiers** | Bronze, Silver, Gold, Platinum, Diamond (III–I) + **Antithesis** (top 100). +20 RP for a win, −16 for a loss. 8-week seasons | v1.1 |
 | **Weapon Mastery** | 20 levels per weapon. Rewards: L10 Tally (kill counter on the weapon), L20 **Gilded** skin. All primaries Gilded → **Inverted** skin | v1.2 |
-| **Titles** | `Counter Artist` (most COUNTERED banners), `Untouchable` (most FLAWLESS rounds), weekly top 1% | v1.2 |
+| **Titles** | `Comeback Kid` (most wins after trailing 0–3), `Untouchable` (most FLAWLESS rounds), weekly top 1% | v1.2 |
 
 ### 4.4 Social
 
 | Feature | Spec | Ship |
 |---|---|---|
-| Duo queue | Invite a player in the server into a 2v2 party | MVP |
+| Duo queue | Two friends stand on the same 2v2 pad together | MVP |
 | Friend invites | `SocialService:PromptGameInvite` | MVP |
-| Call-Outs | Private challenge, choice of first to 3/5/7. **No wagers of anything purchasable** | MVP |
+| Call-Outs | Private 1v1 challenge (hold E near a player), first to 5. **No wagers of anything purchasable** | MVP |
 | Spectate | Watch any live arena in the server from the lobby (camera only) | v1.1 |
 | Clips / Theater | Record the last 15s of snapshots, replay in a 9:16 framing mode | v1.3 |
 | Crews | Clan tags + weekly crew leaderboard | v1.3 |
@@ -316,13 +306,12 @@ At roughly 10 matches per hour that's ~350–450 Coins/hour, so all weapons are 
 ```
 default.project.json
 src/
-  shared/   → ReplicatedStorage.Shared      Config (all tuning), WeaponDefs, Remotes
-  server/   → ServerScriptService.Server    MatchService, CombatService, DataService, ShopService
+  shared/   → ReplicatedStorage.Shared      Config (all tuning), Net (remotes), WeaponModels
+  server/   → ServerScriptService.Server    World (lobby + arenas), Lobby (pads), Match, Combat, Data
   client/   → StarterPlayer.StarterPlayerScripts.Client
-                                            CameraController, MovementController,
-                                            WeaponController, HUD, PickScreen
+                                            Hud, Menus, Weapons, Movement, UI, State
 ```
-Arenas, weapon models and UI art are built in Studio and saved in the place file. Code lives in this repo.
+The lobby, arenas, weapon models and UI are all generated by code. `Antithesis.rbxlx` is built from this repo with `rojo build`.
 
 ### 6.2 Networking
 **Movement: the client moves the character, the server checks it.**
@@ -345,12 +334,11 @@ Arenas, weapon models and UI art are built in Studio and saved in the place file
 7. **Cosmetic effects** (tracers, impacts) go over an `UnreliableRemoteEvent`.
 
 ### 6.3 Servers, Characters, Data
-- **One place, 16-player servers**, each holding the lobby + **4 arenas**. Matches start inside the server: no teleports, no loading screens, no cross-server queue at MVP.
-  - The pairing window widens by 100 Elo every 5s.
+- **One place, 16-player servers.** Each match gets a fresh arena built inside the same server and removed afterwards. No teleports and no loading screens.
   - **Later:** a cross-server Ranked queue (MemoryStore + `TeleportService`), once concurrent players reach about 200.
 - `StreamingEnabled` **off** at MVP. The whole place stays under 8,000 parts, and having everything loaded avoids a common class of beginner bugs.
 - **Avatars: R6** (Game Settings → Avatar). One uniform body size gives hitbox parity for free. Accessories have `CanQuery = false`.
-- **Data:** one `DataStore` key per player holds Coins, unlocks, loadout, palettes, Elo, streak date and settings.
+- **Data:** one `DataStore` key per player holds Coins, unlocks, loadout, palettes, stats, streak date and settings.
   - Load on join with retries. Save with `UpdateAsync` on leave, every 60s, and in `BindToClose`.
   - There's no trading, so plain DataStores are enough.
 
@@ -387,14 +375,14 @@ Arenas, weapon models and UI art are built in Studio and saved in the place file
 | # | Milestone | Done when | Built by |
 |---|---|---|---|
 | M1 | Gun feel | First-person camera, Paragon fires with server-validated hits, HP, death | Claude (code) |
-| M2 | Duel loop | Queue in lobby → moved into the Fulcrum arena → rounds → first to 3 → back to lobby | Claude + you (block out Fulcrum) |
-| M3 | **Counter-Pick** | Pick screen, Thesis lock, reveal card, Antithesis pick, counter hints, all 11 items | Claude (code), you (weapon models) |
+| M2 | Duel loop | Stand on a lobby pad → 5s countdown → arena → rounds → first to 5 → back to lobby | Claude |
+| M3 | Loadouts & weapons | Lobby loadout menu (locked during matches), all 11 items, firing range | Claude |
 | M4 | Coins & saving | Coins awarded, unlock shop, DataStore save/load | Claude |
 | M5 | Movement & juice | Slide, dash, hit markers, sounds, shatter, banners, Shorts-safe HUD | Claude + you (SFX from Creator Store) |
 | M6 | 2v2 + platforms | Doubles, duo invite, Call-Outs, touch and gamepad bindings, settings menu | Claude |
 | M7 | Ship | Mirrorline arena, Game Passes, icon + 3 thumbnails, private playtest with 5+ friends, go public | You + Claude |
 
-**Cut first if time runs short:** Mirrorline (launch with Fulcrum only), Call-Outs, then 2v2. Duel + Counter-Pick + Coins is the minimum shippable game.
+**Cut first if time runs short:** Mirrorline (launch with Fulcrum only), Call-Outs, then 2v2. 1v1 pads + first-to-5 duels + Coins is the minimum shippable game.
 
 ---
 
@@ -419,7 +407,7 @@ Arenas, weapon models and UI art are built in Studio and saved in the place file
 | Crash rate | < 1% |
 
 **Getting players (low budget):**
-- Post clips of the reveal → counter-kill on TikTok and Shorts. The Shorts-safe HUD makes raw recordings usable.
+- Post clutch and flawless-round clips on TikTok and Shorts. The Shorts-safe HUD makes raw recordings usable.
 - A small Roblox Ads Manager campaign in launch week.
 - A Discord server for playtesters.
 - A/B test the icon and thumbnails once traffic allows.

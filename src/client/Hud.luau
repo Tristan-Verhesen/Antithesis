@@ -17,7 +17,7 @@ local camera = workspace.CurrentCamera
 
 local root: Frame
 local crosshair, marker, dmgNumber, hpBar, hpText, ammoText, utilText, dashText
-local scoreText, timerText, phaseText, bigText, feed, bannerText, flashFrame, scope
+local bottom, scoreText, timerText, phaseText, bigText, feed, bannerText, flashFrame, scope
 local edges = {}
 local correction: ColorCorrectionEffect
 local killsThisRound = 0
@@ -42,7 +42,7 @@ function Hud.init(gui: ScreenGui)
 	dmgNumber = UI.label({ Position = UDim2.new(0.5, 30, 0.5, -40), Size = UDim2.fromOffset(80, 24), TextXAlignment = Enum.TextXAlignment.Left, TextSize = 20, Visible = false, Parent = root })
 
 	-- Bottom center: HP, ammo, utility, dash
-	local bottom = UI.new("Frame", { Size = UDim2.fromOffset(420, 70), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -16), BackgroundTransparency = 1, Parent = root })
+	bottom = UI.new("Frame", { Size = UDim2.fromOffset(420, 70), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -16), BackgroundTransparency = 1, Parent = root })
 	local hpBack = UI.new("Frame", { Size = UDim2.fromOffset(200, 14), Position = UDim2.fromOffset(0, 40), BackgroundColor3 = C.Dark, BorderSizePixel = 0, Parent = bottom })
 	hpBar = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Ally, BorderSizePixel = 0, Parent = hpBack })
 	hpText = UI.label({ Position = UDim2.fromOffset(0, 8), Size = UDim2.fromOffset(200, 30), TextSize = 28, Font = Enum.Font.GothamBlack, TextXAlignment = Enum.TextXAlignment.Left, Parent = bottom })
@@ -101,7 +101,8 @@ function Hud.update()
 	local dashLeft = State.dashReadyAt - os.clock()
 	dashText.Text = dashLeft > 0 and string.format("DASH %.1fs", dashLeft) or "DASH READY [SHIFT]"
 
-	crosshair.Visible = not State.scoped and not State.menuOpen
+	bottom.Visible = State.holding
+	crosshair.Visible = State.holding and not State.scoped and not State.menuOpen
 	scope.Visible = State.scoped
 	if os.clock() - dmgAt > 0.6 then
 		dmgNumber.Visible = false
@@ -132,10 +133,7 @@ function Hud.phase(ph)
 	local me, them = ph.team, 3 - ph.team
 	scoreText.Text = string.format('<font color="#%s">%d</font>  -  <font color="#%s">%d</font>', C.Ally:ToHex(), ph.score[me], C.Enemy:ToHex(), ph.score[them])
 	phaseText.Text = ({
-		Pick = "PICK YOUR LOADOUT",
-		Thesis = "THESIS: ROUND WINNER LOCKS FIRST",
-		Antithesis = "ANTITHESIS: ROUND LOSER COUNTER-PICKS",
-		Countdown = "GET READY",
+		Countdown = "FIRST TO " .. ph.winsNeeded .. "  •  " .. string.upper(ph.arena),
 		Live = "FIRST TO " .. ph.winsNeeded .. "  •  " .. string.upper(ph.arena),
 		Collapse = "COLLAPSE: GET TO THE CENTER",
 		RoundEnd = "",

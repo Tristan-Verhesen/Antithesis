@@ -30,11 +30,16 @@ local function equippedId(): string?
 	return player:GetAttribute(Config.Slots[State.slot])
 end
 
-local function canAct(): boolean
+-- Weapons are out in a match or in the lobby firing range; the lobby hall is weapon-free.
+local function canHold(): boolean
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not (hum and root and hum.Health > 0) or root.Anchored or State.dashing or State.menuOpen then
+	return hum ~= nil and hum.Health > 0 and (player:GetAttribute("MatchId") ~= 0 or State.inRange)
+end
+
+local function canAct(): boolean
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not canHold() or not root or root.Anchored or State.dashing or State.menuOpen then
 		return false
 	end
 	local ph = State.phase
@@ -47,7 +52,7 @@ local function buildViewmodel()
 		viewmodel = nil
 	end
 	local id = equippedId()
-	if not id or not player.Character then
+	if not id or not State.holding then
 		return
 	end
 	viewmodel = WeaponModels.build(id, player:GetAttribute("Palette"))
@@ -180,7 +185,7 @@ local function tryFire()
 end
 
 function Weapons.equip(slot: number)
-	if slot == State.slot or not player:GetAttribute(Config.Slots[slot]) then
+	if slot == State.slot or not State.holding or not player:GetAttribute(Config.Slots[slot]) then
 		return
 	end
 	State.slot = slot
@@ -192,10 +197,20 @@ end
 local function refresh()
 	resetAmmo()
 	buildViewmodel()
-	Net.Event:FireServer("Equip", State.slot)
+	Net.Event:FireServer("Equip", State.holding and State.slot or 0)
 end
 
 local function render(dt: number)
+	local holding = canHold()
+	if holding ~= State.holding then -- entered/left the range, a match, or died
+		State.holding = holding
+		if not holding then
+			State.ads = false
+			fireHeld = false
+		end
+		buildViewmodel()
+		Net.Event:FireServer("Equip", holding and State.slot or 0)
+	end
 	local id = equippedId()
 	local w = Config.Weapons[id or ""]
 	local wantAds = State.ads and w ~= nil and w.adsFov ~= nil and canAct()
@@ -283,6 +298,7 @@ function Weapons.init()
 	local function onCharacter(char: Model)
 		State.slot = 1
 		State.ads = false
+		State.holding = canHold()
 		refresh()
 		char:WaitForChild("Humanoid").Died:Connect(function()
 			if viewmodel then

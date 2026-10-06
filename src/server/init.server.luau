@@ -9,11 +9,13 @@ local World = require(script.World)
 local Data = require(script.Data)
 local Combat = require(script.Combat)
 local Match = require(script.Match)
+local Lobby = require(script.Lobby)
 
 World.build()
 Combat.start()
 Data.start(World)
-Match.start(World.arenas)
+Match.start()
+Lobby.start()
 
 local handlers = {
 	Hello = Data.push,
@@ -22,10 +24,7 @@ local handlers = {
 	Melee = Combat.melee,
 	Throw = Combat.throw,
 	Equip = Combat.equip,
-	Queue = Match.queue,
-	Cancel = Match.leaveQueue,
 	Pick = Match.pick,
-	Ready = Match.ready,
 	ChallengeReply = Match.challengeReply,
 	Rematch = Match.rematch,
 	Unlock = Data.unlock,
@@ -95,8 +94,7 @@ local function onPlayer(player: Player)
 		player:SetAttribute(slot, (w and w.slot == slot and p.unlocked[id]) and id or Config.Starter[slot])
 	end
 	player:SetAttribute("Palette", p.palettes[p.palette] and p.palette or "Default")
-	player.CameraMode = Enum.CameraMode.LockFirstPerson
-	player.DevEnableMouseLock = false -- Shift is Dash, not shift-lock
+	player.DevEnableMouseLock = false -- Shift is Dash, not shift-lock (camera mode is set by the client)
 	player.CharacterAdded:Connect(function(char)
 		onCharacter(player, char)
 	end)

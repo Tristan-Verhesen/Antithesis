@@ -2,9 +2,9 @@
 return {
 	profile = nil, -- server profile snapshot
 	phase = nil, -- current match phase payload (nil in lobby)
-	queue = nil, -- queued mode name
-	queuedAt = 0,
-	lastMode = nil, -- last queued mode, for auto-requeue
+	pad = nil, -- pad status while standing on a lobby pad
+	inRange = false, -- inside the lobby firing range
+	holding = false, -- weapons out (in a match or in the range)
 	slot = 1,
 	ads = false,
 	scoped = false,

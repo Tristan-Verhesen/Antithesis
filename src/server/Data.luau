@@ -31,7 +31,6 @@ local function default()
 		palettes = { Default = true },
 		palette = "Default",
 		loadout = table.clone(Config.Starter),
-		elo = 1000,
 		wins = 0,
 		losses = 0,
 		matches = 0,

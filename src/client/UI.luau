@@ -49,8 +49,14 @@ function UI.panel(props): Frame
 		defaults[k] = v
 	end
 	local frame = UI.new("Frame", defaults, { UI.new("UICorner", { CornerRadius = UDim.new(0, 10) }) })
-	-- A visible Modal button frees the mouse from first-person lock while the panel is open.
-	UI.new("TextButton", { Modal = true, Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(1, 1), Parent = frame })
+	-- Modal frees the mouse from first-person lock, but only while the panel is open;
+	-- an always-on Modal button would leave the cursor free and break aiming.
+	local modal = UI.new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(1, 1), Parent = frame })
+	local function sync()
+		modal.Modal = frame.Visible
+	end
+	frame:GetPropertyChangedSignal("Visible"):Connect(sync)
+	sync()
 	return frame
 end
 

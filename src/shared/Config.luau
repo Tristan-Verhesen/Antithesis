@@ -9,6 +9,9 @@ Config.Colors = {
 	Gold = Color3.fromRGB(250, 204, 21),
 	Good = Color3.fromRGB(74, 222, 128),
 	Bad = Color3.fromRGB(239, 68, 68),
+	Purple = Color3.fromRGB(168, 85, 247),
+	Metal = Color3.fromRGB(28, 30, 36),
+	MetalLight = Color3.fromRGB(52, 55, 64),
 }
 
 Config.Movement = {
@@ -28,25 +31,36 @@ Config.Movement = {
 }
 
 Config.Modes = {
-	Duel = { teamSize = 1, winsNeeded = 3, liveTime = 60, label = "DUEL 1v1" },
-	Doubles = { teamSize = 2, winsNeeded = 3, liveTime = 75, label = "DOUBLES 2v2" },
+	Duel = { teamSize = 1, winsNeeded = 5, liveTime = 60, label = "1v1" },
+	Doubles = { teamSize = 2, winsNeeded = 5, liveTime = 75, label = "2v2" },
 }
 
 Config.Match = {
-	BlindPick = 12,
-	ThesisPick = 5,
-	AntithesisPick = 7,
 	Countdown = 3,
 	Collapse = 15,
 	CollapseDps = 20,
 	CollapseMinRadius = 8,
 	RoundEnd = 3,
-	ResultsTime = 8, -- rematch window
-	EloWindow = 100, -- grows by this every EloWindowEvery seconds waited
-	EloWindowEvery = 5,
-	EloK = 32,
+	ResultsTime = 10, -- rematch window
 	RewindCap = 0.2,
 }
+
+-- Lobby: pad stations along the hall walls (left wall front-to-back, then right wall).
+Config.Lobby = {
+	Stations = { "Duel", "Duel", "Doubles", "Duel", "Duel", "Doubles" },
+	PadCountdown = 5,
+	PadRadius = 4.5,
+	MinZoom = 8, -- third-person camera in the lobby
+	MaxZoom = 20,
+	RangeCenter = Vector3.new(0, 15, -146), -- firing range room: first person + weapons inside
+	RangeSize = Vector3.new(60, 40, 92),
+}
+
+function Config.inRange(pos: Vector3): boolean
+	local d = pos - Config.Lobby.RangeCenter
+	local h = Config.Lobby.RangeSize / 2
+	return math.abs(d.X) <= h.X and math.abs(d.Y) <= h.Y and math.abs(d.Z) <= h.Z
+end
 
 Config.Rewards = {
 	Win = 40,
@@ -85,16 +99,6 @@ Config.Order = {
 	Utility = { "Glare", "Veil", "Crack" },
 }
 Config.Starter = { Primary = "Paragon", Secondary = "Ward", Melee = "Edge", Utility = "Glare" }
-
--- Thesis item -> suggested Antithesis answers (pick-screen hints)
-Config.Counters = {
-	Meridian = { "Veil", "Hornet", "Breaker" },
-	Breaker = { "Paragon", "Triad", "Crack" },
-	Hornet = { "Triad", "Meridian", "Glare" },
-	Paragon = { "Triad", "Breaker" },
-	Triad = { "Hornet", "Meridian" },
-	Veil = { "Glare", "Crack" },
-}
 
 -- Weapon palettes (skins). price = Coins; gamePass = Robux Game Pass id (0 = not on sale yet).
 Config.Palettes = {

@@ -1,15 +1,15 @@
--- Queues, in-server matchmaking, Counter-Pick round flow, scoring, rewards, rematch and challenges.
+-- Match flow (Rivals-style): spawn → countdown → one-life round → repeat until a team has 5 round wins.
+-- Loadouts are whatever players equipped in the lobby. Also handles rematches and player challenges.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Net = require(ReplicatedStorage.Shared.Net)
 local Combat = require(script.Parent.Combat)
 local Data = require(script.Parent.Data)
+local World = require(script.Parent.World)
 
 local M = Config.Match
 local Match = {}
-local arenas = {}
-local queues = { Duel = {}, Doubles = {} }
 local byPlayer = {}
 local challenges = {}
 local rematch = {}
@@ -28,19 +28,6 @@ local function humOf(p: Player): Humanoid?
 	return (hum and hum.Health > 0) and hum or nil
 end
 
-local function loadoutOf(p: Player)
-	local l = {}
-	for _, slot in Config.Slots do
-		l[slot] = p:GetAttribute(slot)
-	end
-	return l
-end
-
-local function elo(p: Player): number
-	local d = Data.get(p)
-	return d and d.elo or 1000
-end
-
 local function banner(m, p: Player, text: string)
 	m.stats[p].banners += 1
 	Net.Event:FireClient(p, "Banner", text)
@@ -50,7 +37,7 @@ local function phase(m, name: string, duration: number)
 	m.phase = name
 	m.endsAt = workspace:GetServerTimeNow() + duration
 	for _, p in m.players do
-		if p.Parent then
+		if p.Parent and byPlayer[p] == m then
 			Net.Event:FireClient(p, "Phase", {
 				phase = name,
 				endsAt = m.endsAt,
@@ -60,129 +47,33 @@ local function phase(m, name: string, duration: number)
 				mode = m.mode,
 				arena = m.arena.name,
 				winsNeeded = m.cfg.winsNeeded,
-				canPick = m.picking[p] == true,
-				reveal = m.reveal,
 				roundWinner = m.roundWinner,
 			})
 		end
 	end
 end
 
-local function waitFor(m, seconds: number, done: (() -> boolean)?)
+local function waitFor(m, seconds: number)
 	local deadline = os.clock() + seconds
-	while os.clock() < deadline and not m.over and not (done and done()) do
+	while os.clock() < deadline and not m.over do
 		task.wait(0.1)
 	end
 end
 
-local function freeArena(mode: string)
-	local preferred = mode == "Doubles" and "Mirrorline" or "Fulcrum"
-	local any
-	for _, a in arenas do
-		if not a.busy then
-			if a.name == preferred then
-				return a
-			end
-			any = any or a
-		end
-	end
-	return any
+function Match.busy(player: Player): boolean
+	return byPlayer[player] ~= nil
 end
 
-function Match.leaveQueue(player: Player)
-	for _, q in queues do
-		for i = #q, 1, -1 do
-			if q[i].player == player then
-				table.remove(q, i)
-			end
-		end
-	end
-	if player.Parent then
-		Net.Event:FireClient(player, "Queue", nil)
-	end
-end
-
-function Match.queue(player: Player, mode: any)
-	if not queues[mode] or byPlayer[player] then
-		return
-	end
-	Match.leaveQueue(player)
-	table.insert(queues[mode], { player = player, t = os.clock() })
-	Net.Event:FireClient(player, "Queue", mode)
-end
-
----------------------------------------------------------------- picking
-
-local function setPicking(m, team: number?)
-	m.picking, m.ready = {}, {}
-	for _, p in m.players do
-		if team == nil or p:GetAttribute("Team") == team then
-			m.picking[p] = true
-		end
-	end
-end
-
-local function allReady(m): boolean
-	for p in m.picking do
-		if p.Parent and byPlayer[p] == m and not m.ready[p] then
-			return false
-		end
-	end
-	return true
-end
-
-local function pickPhase(m)
-	local winner = m.lastWinner
-	m.reveal = nil
-	m.roundWinner = nil
-	if not winner then
-		setPicking(m, nil)
-		phase(m, "Pick", M.BlindPick)
-		waitFor(m, M.BlindPick, function()
-			return allReady(m)
-		end)
-	else
-		setPicking(m, winner)
-		phase(m, "Thesis", M.ThesisPick)
-		waitFor(m, M.ThesisPick, function()
-			return allReady(m)
-		end)
-		m.reveal = {}
-		for _, p in m.teams[winner] do
-			table.insert(m.reveal, { name = p.DisplayName, loadout = loadoutOf(p) })
-		end
-		send(m.players, "Reveal", m.reveal)
-		setPicking(m, 3 - winner)
-		phase(m, "Antithesis", M.AntithesisPick)
-		waitFor(m, M.AntithesisPick, function()
-			return allReady(m)
-		end)
-	end
-	m.picking = {}
-end
-
+-- Lobby loadout changes only; loadouts are locked during a match.
 function Match.pick(player: Player, slot: any, id: any)
 	local p = Data.get(player)
 	local w = Config.Weapons[id]
-	if not (p and w and w.slot == slot and p.unlocked[id]) then
-		return
-	end
-	local m = byPlayer[player]
-	if m and not m.picking[player] then
+	if byPlayer[player] or not (p and w and w.slot == slot and p.unlocked[id]) then
 		return
 	end
 	player:SetAttribute(slot, id)
 	p.loadout[slot] = id
-	if not m then
-		Combat.reset(player) -- lobby loadout change
-	end
-end
-
-function Match.ready(player: Player)
-	local m = byPlayer[player]
-	if m and m.picking[player] then
-		m.ready[player] = true
-	end
+	Combat.reset(player)
 end
 
 ---------------------------------------------------------------- rounds
@@ -295,9 +186,8 @@ end
 local function roundEnd(m, winner: number)
 	if winner > 0 then
 		m.score[winner] += 1
-		local countered = m.lastWinner == 3 - winner
 		for _, p in m.teams[winner] do
-			if m.stats[p] and byPlayer[p] == m then
+			if byPlayer[p] == m then
 				m.stats[p].roundsWon += 1
 				local hum = humOf(p)
 				if hum and hum.Health >= hum.MaxHealth then
@@ -306,38 +196,13 @@ local function roundEnd(m, winner: number)
 				if hum and m.clutch[p] then
 					banner(m, p, "CLUTCH 1v2")
 				end
-				if countered then
-					banner(m, p, "COUNTERED")
-				end
 			end
 		end
-		m.lastWinner = winner
-	else
-		m.lastWinner = nil -- draw: blind picks again
 	end
-	m.roundWinner = winner
+	m.roundWinner = winner -- 0 = draw, round is replayed
 	phase(m, "RoundEnd", M.RoundEnd)
 	waitFor(m, M.RoundEnd)
-end
-
-local function updateElo(m, winner: number)
-	local function avg(team)
-		local s = 0
-		for _, p in team do
-			s += elo(p)
-		end
-		return s / #team
-	end
-	local expected = 1 / (1 + 10 ^ ((avg(m.teams[2]) - avg(m.teams[1])) / 400))
-	local delta = M.EloK * ((winner == 1 and 1 or 0) - expected)
-	for t, team in m.teams do
-		for _, p in team do
-			local d = Data.get(p)
-			if d then
-				d.elo = math.floor(d.elo + (t == 1 and delta or -delta) + 0.5)
-			end
-		end
-	end
+	m.roundWinner = nil
 end
 
 local function finish(m)
@@ -345,9 +210,6 @@ local function finish(m)
 		or (m.score[1] >= m.cfg.winsNeeded and 1)
 		or (m.score[2] >= m.cfg.winsNeeded and 2)
 		or 0
-	if not m.private and winner > 0 then
-		updateElo(m, winner)
-	end
 	local group = { mode = m.mode, teams = m.teams, votes = {}, expires = os.clock() + M.ResultsTime }
 	for _, p in m.players do
 		local wasHere = byPlayer[p] == m
@@ -361,20 +223,16 @@ local function finish(m)
 			p:SetAttribute("MatchId", 0)
 			p:SetAttribute("Team", 0)
 			rematch[p] = group
-			Net.Event:FireClient(p, "Results", { won = won, lines = lines, score = m.score, team = team, private = m.private })
+			Net.Event:FireClient(p, "Results", { won = won, lines = lines, score = m.score, team = team })
 			task.spawn(p.LoadCharacter, p)
 		end
 	end
-	m.arena.busy = false
+	World.destroyArena(m.arena)
 end
 
 local function run(m)
 	while not m.over do
 		m.round += 1
-		pickPhase(m)
-		if m.over then
-			break
-		end
 		spawnAll(m)
 		phase(m, "Countdown", M.Countdown)
 		waitFor(m, M.Countdown)
@@ -393,32 +251,24 @@ local function run(m)
 	finish(m)
 end
 
-local function start(mode: string, teams, private: boolean): boolean
-	local arena = freeArena(mode)
-	if not arena then
-		return false
-	end
-	arena.busy = true
+function Match.begin(mode: string, teams: { { Player } }, private: boolean)
 	nextId += 1
 	local m = {
 		id = nextId,
 		mode = mode,
 		cfg = Config.Modes[mode],
-		arena = arena,
+		arena = World.createArena(),
 		teams = teams,
 		players = {},
 		score = { 0, 0 },
 		round = 0,
 		private = private,
-		picking = {},
-		ready = {},
 		stats = {},
 		clutch = {},
-		phase = "Pick",
+		phase = "Countdown",
 	}
 	for t, team in teams do
 		for _, p in team do
-			Match.leaveQueue(p)
 			challenges[p] = nil
 			rematch[p] = nil
 			byPlayer[p] = m
@@ -429,36 +279,6 @@ local function start(mode: string, teams, private: boolean): boolean
 		end
 	end
 	task.spawn(run, m)
-	return true
-end
-
----------------------------------------------------------------- matchmaking
-
-local function tryDuel()
-	local q = queues.Duel
-	for i = 1, #q do
-		for j = i + 1, #q do
-			local a, b = q[i], q[j]
-			local waited = os.clock() - math.min(a.t, b.t)
-			local window = M.EloWindow * (1 + waited // M.EloWindowEvery)
-			if math.abs(elo(a.player) - elo(b.player)) <= window then
-				return { { a.player }, { b.player } }
-			end
-		end
-	end
-	return nil
-end
-
-local function tryDoubles()
-	local q = queues.Doubles
-	if #q < 4 then
-		return nil
-	end
-	local four = { q[1].player, q[2].player, q[3].player, q[4].player }
-	table.sort(four, function(x, y)
-		return elo(x) > elo(y)
-	end)
-	return { { four[1], four[4] }, { four[2], four[3] } }
 end
 
 ---------------------------------------------------------------- social
@@ -486,9 +306,7 @@ function Match.challengeReply(player: Player, from: any, accept: any)
 	if accept ~= true then
 		Net.Event:FireClient(from, "Notify", player.DisplayName .. " declined your challenge")
 	elseif os.clock() - sentAt < 20 and not byPlayer[player] and not byPlayer[from] then
-		if not start("Duel", { { from }, { player } }, true) then
-			send({ player, from }, "Notify", "All arenas are busy, try again in a moment")
-		end
+		Match.begin("Duel", { { from }, { player } }, true)
 	end
 end
 
@@ -513,11 +331,10 @@ function Match.rematch(player: Player)
 	for _, p in everyone do
 		rematch[p] = nil
 	end
-	start(g.mode, g.teams, true)
+	Match.begin(g.mode, g.teams, true)
 end
 
 function Match.onLeave(player: Player)
-	Match.leaveQueue(player)
 	challenges[player] = nil
 	rematch[player] = nil
 	local m = byPlayer[player]
@@ -535,9 +352,7 @@ function Match.onLeave(player: Player)
 	m.over = true
 end
 
-function Match.start(worldArenas)
-	arenas = worldArenas
-
+function Match.start()
 	Combat.canDamage = function(a, v)
 		local m = byPlayer[a]
 		return m ~= nil and m == byPlayer[v] and (m.phase == "Live" or m.phase == "Collapse")
@@ -588,18 +403,6 @@ function Match.start(worldArenas)
 			end
 		end
 	end
-
-	task.spawn(function()
-		while true do
-			task.wait(1)
-			for mode, try in { Duel = tryDuel, Doubles = tryDoubles } do
-				local teams = freeArena(mode) and try()
-				if teams then
-					start(mode, teams, false)
-				end
-			end
-		end
-	end)
 end
 
 return Match

@@ -1,0 +1,129 @@
+-- Pad matchmaking (Rivals-style): stand on a pad; when both pads of a station are full,
+-- a countdown starts and everyone on the station is sent into a match. Stepping off cancels.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage.Shared.Config)
+local Net = require(ReplicatedStorage.Shared.Net)
+local Match = require(script.Parent.Match)
+local World = require(script.Parent.World)
+
+local Lobby = {}
+local L = Config.Lobby
+local lastStatus: { [Player]: string } = {}
+
+local function onPad(player: Player, pad): boolean
+	if Match.busy(player) then
+		return false
+	end
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (hum and root and hum.Health > 0) then
+		return false
+	end
+	local offset = root.Position - pad.center
+	return offset.Y > -1 and offset.Y < 8 and Vector2.new(offset.X, offset.Z).Magnitude <= L.PadRadius
+end
+
+local function setText(label: TextLabel, text: string)
+	if label.Text ~= text then
+		label.Text = text
+	end
+end
+
+local function tell(player: Player, status)
+	local key = status and (status.label .. status.count .. "/" .. status.needed .. tostring(status.startsAt)) or ""
+	if lastStatus[player] ~= key then
+		lastStatus[player] = key
+		Net.Event:FireClient(player, "Pad", status)
+	end
+end
+
+local function tick()
+	local now = workspace:GetServerTimeNow()
+	local seen: { [Player]: any } = {}
+
+	for _, station in World.stations do
+		-- Keep players who are still standing on their pad, then fill free spots in arrival order.
+		for _, pad in station.pads do
+			for i = #pad.occupants, 1, -1 do
+				local p = pad.occupants[i]
+				if p.Parent and not seen[p] and onPad(p, pad) then
+					seen[p] = station
+				else
+					table.remove(pad.occupants, i)
+				end
+			end
+		end
+		for _, pad in station.pads do
+			for _, p in Players:GetPlayers() do
+				if #pad.occupants >= station.size then
+					break
+				end
+				if not seen[p] and onPad(p, pad) then
+					seen[p] = station
+					table.insert(pad.occupants, p)
+				end
+			end
+		end
+
+		local count, needed = 0, station.size * 2
+		for _, pad in station.pads do
+			count += #pad.occupants
+		end
+		if count == needed then
+			station.startsAt = station.startsAt or now + L.PadCountdown
+		else
+			station.startsAt = nil
+		end
+
+		local left = station.startsAt and math.max(0, math.ceil(station.startsAt - now))
+		for _, pad in station.pads do
+			local text = #pad.occupants .. "/" .. station.size
+			setText(pad.board, left and text .. "\nSTARTING " .. left or text)
+			pad.ring.Transparency = #pad.occupants >= station.size and 0 or 0.5
+		end
+
+		local status = { label = Config.Modes[station.mode].label, count = count, needed = needed, startsAt = station.startsAt }
+		for _, pad in station.pads do
+			for _, p in pad.occupants do
+				tell(p, status)
+			end
+		end
+
+		if station.startsAt and now >= station.startsAt then
+			local teams = { table.clone(station.pads[1].occupants), table.clone(station.pads[2].occupants) }
+			for _, pad in station.pads do
+				table.clear(pad.occupants)
+			end
+			station.startsAt = nil
+			for _, team in teams do
+				for _, p in team do
+					seen[p] = nil
+					tell(p, nil)
+				end
+			end
+			Match.begin(station.mode, teams, false)
+		end
+	end
+
+	for _, p in Players:GetPlayers() do
+		if not seen[p] then
+			tell(p, nil)
+		end
+	end
+end
+
+function Lobby.start()
+	Players.PlayerRemoving:Connect(function(p)
+		lastStatus[p] = nil
+	end)
+	task.spawn(function()
+		while true do
+			tick()
+			task.wait(0.15)
+		end
+	end)
+end
+
+return Lobby

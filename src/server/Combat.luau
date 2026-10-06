@@ -100,11 +100,13 @@ local function damageFor(w, part: BasePart, dist: number): number
 	return dmg
 end
 
+-- Alive, not frozen, and somewhere weapons are allowed (a match, or the lobby firing range).
 local function alive(player: Player)
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if hum and root and hum.Health > 0 and not root.Anchored then
+	if hum and root and hum.Health > 0 and not root.Anchored
+		and (player:GetAttribute("MatchId") ~= 0 or Config.inRange(root.Position)) then
 		return char, root
 	end
 	return nil
@@ -154,19 +156,20 @@ function Combat.clear(player: Player)
 	lastPos[player] = nil
 end
 
+-- slot 1-3 shows that weapon in the character's hand; 0 puts it away (lobby hall).
 function Combat.equip(player: Player, slot: any)
-	if type(slot) ~= "number" or not Config.Slots[slot] or slot > 3 then
+	if type(slot) ~= "number" or slot < 0 or slot > 3 or slot % 1 ~= 0 then
 		return
 	end
-	local id = player:GetAttribute(Config.Slots[slot])
 	local char = player.Character
+	local old = char and char:FindFirstChild("HeldWeapon")
+	if old then
+		old:Destroy()
+	end
+	local id = slot > 0 and player:GetAttribute(Config.Slots[slot])
 	local arm = char and (char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand"))
 	if not (id and arm) then
 		return
-	end
-	local old = char:FindFirstChild("HeldWeapon")
-	if old then
-		old:Destroy()
 	end
 	local model = WeaponModels.build(id, player:GetAttribute("Palette"))
 	model.Name = "HeldWeapon"

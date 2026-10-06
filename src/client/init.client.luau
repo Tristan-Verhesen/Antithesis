@@ -4,7 +4,9 @@ if not game:IsLoaded() then
 end
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local Config = require(ReplicatedStorage.Shared.Config)
 local Net = require(ReplicatedStorage.Shared.Net)
 local State = require(script.State)
 local UI = require(script.UI)
@@ -40,12 +42,9 @@ local handlers = {
 		Menus.refresh()
 	end,
 	Phase = setPhase,
-	Reveal = Menus.reveal,
 	Results = Menus.results,
-	Queue = function(mode)
-		State.queue = mode
-		State.queuedAt = os.clock()
-		Menus.refresh()
+	Pad = function(status)
+		State.pad = status
 	end,
 	Hit = Hud.hit,
 	Damaged = Hud.damaged,
@@ -83,6 +82,20 @@ end
 player:GetAttributeChangedSignal("MatchId"):Connect(function()
 	if player:GetAttribute("MatchId") == 0 then
 		setPhase(nil)
+	end
+end)
+
+-- Third person in the lobby, first person in matches and the firing range (Rivals-style).
+local firstPerson: boolean? = nil
+RunService.RenderStepped:Connect(function()
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	State.inRange = root ~= nil and player:GetAttribute("MatchId") == 0 and Config.inRange(root.Position)
+	local fp = player:GetAttribute("MatchId") ~= 0 or State.inRange
+	if fp ~= firstPerson then
+		firstPerson = fp
+		player.CameraMode = fp and Enum.CameraMode.LockFirstPerson or Enum.CameraMode.Classic
+		player.CameraMinZoomDistance = fp and 0.5 or Config.Lobby.MinZoom
+		player.CameraMaxZoomDistance = fp and 0.5 or Config.Lobby.MaxZoom
 	end
 end)
 
