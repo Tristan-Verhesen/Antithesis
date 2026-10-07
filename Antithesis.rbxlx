@@ -831,7 +831,15 @@ end)
       <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">Arena</string>
-          <string name="Source"><![CDATA[-- Battle arenas: one is built for every match and destroyed afterwards.
+          <string name="Source"><![CDATA[-- Battle arenas: one is built for every match at (1000 + 500 * slot, 0, 0) and destroyed afterwards.
+-- An arena is a closed hall: floor, panelled walls and a ribbed ceiling 20 studs up, so the sky is never visible.
+-- Look: the "Contrast" light and dark halves inside a dark sci-fi shell. The x < 0 end (team 1) carries cyan
+-- accents, the x > 0 end (team 2) orange ones, and gold marks the center line.
+--
+-- Shot safety: the layout boxes are the exact collision volumes (movement, bullets and line of sight). Every
+-- detail on them is decor (Props.decor) that lies within 0.1 stud of the box surface, so it never changes what
+-- blocks a shot. Apart from the boxes only the floor, walls, ceiling, kick plates, corner columns and gate
+-- pilasters (all against the walls) collide.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Props = require(script.Parent.Props)
@@ -840,7 +848,8 @@ local C = Config.Colors
 local GRAY = Color3.fromRGB(120, 122, 128)
 
 -- Half-arena layouts (x < 0). Boxes are mirrored across x = 0; boxes with x == 0 are center pieces.
--- {x, z, sizeX, sizeY, sizeZ, baseY?}
+-- {x, z, sizeX, sizeY, sizeZ, baseY?}. styles[i] is the decor look of boxes[i]: "crate", "wall", "shield", "pillar"
+-- or "platform" (purely visual; the boxes themselves are the collision volumes).
 local LAYOUTS = {
 	{
 		name = "Fulcrum",
@@ -861,6 +870,8 @@ local LAYOUTS = {
 			{ -5, 26, 6, 10, 2 },
 			{ 0, 20, 2, 10, 6 },
 		},
+		-- decor look of each box above, in the same order
+		styles = { "shield", "crate", "crate", "wall", "platform", "crate", "crate", "wall", "wall", "wall", "wall", "wall", "wall" },
 	},
 	{
 		name = "Mirrorline",
@@ -886,12 +897,492 @@ local LAYOUTS = {
 			{ 0, -38, 6, 4, 6 },
 			{ 0, 38, 6, 4, 6 },
 		},
+		-- decor look of each box above, in the same order
+		styles = {
+			"shield", "pillar", "pillar", "pillar", "pillar", "pillar", "platform", "crate", "platform",
+			"crate", "wall", "wall", "crate", "crate", "platform", "pillar", "crate", "crate",
+		},
 	},
 }
 
+---------------------------------------------------------------- look
+
+local HEIGHT = 20 -- walls are 20 tall; the ceiling's underside is at this height
+local UP = Vector3.new(0, 1, 0)
+local METAL = Enum.Material.Metal
+local PLATE = Enum.Material.DiamondPlate
+local NEON = Enum.Material.Neon
+local GLASS = Enum.Material.Glass
+
+local WALL = Color3.fromRGB(40, 43, 51)
+local CEILING = Color3.fromRGB(16, 17, 22)
+local COFFER = Color3.fromRGB(28, 30, 37)
+local BEAM = Color3.fromRGB(50, 53, 62)
+local DARK = Color3.fromRGB(23, 25, 31)
+local PIPE = Color3.fromRGB(66, 70, 82)
+local LAMP = Color3.fromRGB(236, 240, 255)
+local OUT = 0.08 -- how far trims stand proud of a cover box (decor stays within 0.1 of its surface)
+
+-- Per-side looks. Side 1 is x < 0 (light floor, dark cover, cyan); side 2 is x > 0 (dark floor, light cover, orange).
+-- Ceiling lights are tinted a little cooler over the light half and a little warmer over the dark half.
+local SIDES = {
+	{
+		dir = -1,
+		floor = C.Light,
+		grid = Color3.fromRGB(198, 199, 204),
+		wallPanel = Color3.fromRGB(112, 118, 132),
+		lamp = Color3.fromRGB(226, 240, 255),
+		accent = C.Ally,
+		box = C.Dark,
+		trim = C.Metal,
+		panel = C.MetalLight,
+		top = Color3.fromRGB(60, 63, 72),
+	},
+	{
+		dir = 1,
+		floor = C.Dark,
+		grid = Color3.fromRGB(64, 67, 76),
+		wallPanel = Color3.fromRGB(54, 57, 66),
+		lamp = Color3.fromRGB(255, 240, 226),
+		accent = C.Enemy,
+		box = C.Light,
+		trim = Color3.fromRGB(146, 150, 158),
+		panel = Color3.fromRGB(214, 213, 210),
+		top = Color3.fromRGB(196, 197, 200),
+	},
+}
+local CENTER = {
+	accent = C.Gold,
+	box = GRAY,
+	trim = C.Metal,
+	panel = Color3.fromRGB(104, 107, 116),
+	top = Color3.fromRGB(88, 91, 100),
+}
+
+---------------------------------------------------------------- building helpers
+
+-- Structure: floor, walls, ceiling and cover boxes.
+local function solid(m: Instance, size: Vector3, cf: CFrame, color: Color3, name: string, material: Enum.Material?): Part
+	return Props.block(m, size, cf, color, name, material)
+end
+
+-- Purely visual detail: no collisions, queries, touches or shadows.
+local function detail(m: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?): Part
+	local p = Props.block(m, size, cf, color, "Detail", material)
+	p.CastShadow = false
+	Props.decor(p)
+	return p
+end
+
+local function glow(m: Instance, size: Vector3, cf: CFrame, color: Color3): Part
+	local p = Props.neon(m, size, cf, color)
+	p.Name = "Glow"
+	Props.decor(p)
+	return p
+end
+
+-- Bevel piece. A wedge is solid below the slope that rises from its front (look direction) to its back.
+local function wedge(m: Instance, size: Vector3, cf: CFrame, color: Color3): WedgePart
+	local w = Instance.new("WedgePart")
+	w.Name = "Bevel"
+	w.Anchored = true
+	w.Size = size
+	w.CFrame = cf
+	w.Color = color
+	w.Material = METAL
+	w.TopSurface = Enum.SurfaceType.Smooth
+	w.BottomSurface = Enum.SurfaceType.Smooth
+	w.CastShadow = false
+	Props.decor(w)
+	w.Parent = m
+	return w
+end
+
+-- Decor cylinder lying along the CFrame's X axis.
+local function pipe(m: Instance, length: number, diameter: number, cf: CFrame, color: Color3): Part
+	local p = detail(m, Vector3.new(length, diameter, diameter), cf, color, METAL)
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+
+-- Decor vertical-axis disc (spawn pads).
+local function round(m: Instance, center: Vector3, diameter: number, height: number, color: Color3, material: Enum.Material?): Part
+	local p = Props.disc(m, center, diameter, height, color, material)
+	p.Name = "Detail"
+	p.CastShadow = false
+	Props.decor(p)
+	return p
+end
+
+-- Ceiling light: a neon panel with a real downward SurfaceLight. Only the central panels cast shadows.
+local function lamp(m: Instance, cf: CFrame, size: Vector3, color: Color3, shadows: boolean): Part
+	local p = Props.lightPanel(m, cf, size, color, 2.2, 46)
+	Props.decor(p)
+	local light = p:FindFirstChildOfClass("SurfaceLight")
+	if light and light:IsA("SurfaceLight") then
+		light.Angle = 150
+		light.Shadows = shadows
+	end
+	return p
+end
+
+-- Uncovered stretches of [0, len] between sorted, non-overlapping gaps.
+local function freeRuns(len: number, gaps: { { number } }?): { { number } }
+	local runs = {}
+	local t = 0
+	for _, g in gaps or {} do
+		if g[1] > t then
+			table.insert(runs, { t, math.min(g[1], len) })
+		end
+		t = math.max(t, g[2])
+	end
+	if len > t then
+		table.insert(runs, { t, len })
+	end
+	return runs
+end
+
+---------------------------------------------------------------- walls
+
+-- Dresses the inner face of a wall from `a` to `b` (arena-relative points on the face at floor level):
+-- a kick plate with a bevel and a neon line, panel bays split by ribs with neon strips, a bevelled top band
+-- with a neon line and a light strip along the ceiling edge. `gaps` (distances from `a`) stay bare.
+local function dressWall(m: Model, O: CFrame, a: Vector3, b: Vector3, inward: Vector3, side, gaps: { { number } }?)
+	local span = b - a
+	local len = span.Magnitude
+	local along = span.Unit
+	local function place(t: number, depth: number, y: number, up: Vector3?): CFrame
+		local p = a + along * t + inward * depth + Vector3.new(0, y, 0)
+		return O * CFrame.lookAt(p, p + inward, up or UP)
+	end
+	local mid = len / 2
+	solid(m, Vector3.new(len, 1.6, 0.5), place(mid, 0.25, 0.8), C.Metal, "Wall", METAL)
+	wedge(m, Vector3.new(len, 0.4, 0.5), place(mid, 0.25, 1.8), C.Metal)
+	glow(m, Vector3.new(len, 0.14, 0.12), place(mid, 0.06, 2.3), side.accent)
+	detail(m, Vector3.new(len, 3.8, 0.45), place(mid, 0.225, HEIGHT - 1.9), C.Metal, METAL)
+	wedge(m, Vector3.new(len, 0.45, 0.45), place(mid, 0.225, HEIGHT - 4.025, -UP), C.Metal)
+	glow(m, Vector3.new(len, 0.16, 0.12), place(mid, 0.06, HEIGHT - 4.55), side.accent)
+	glow(m, Vector3.new(len, 0.12, 0.3), place(mid, 0.75, HEIGHT - 0.08), side.lamp)
+	for _, run in freeRuns(len, gaps) do
+		local runLen = run[2] - run[1]
+		if runLen >= 3 then
+			local n = math.max(1, math.round(runLen / 10))
+			local bay = runLen / n
+			for i = 1, n do
+				local t = run[1] + (i - 0.5) * bay
+				detail(m, Vector3.new(bay - 0.7, 12.6, 0.2), place(t, 0.1, 8.9), side.wallPanel, METAL)
+				if i < n then
+					local rib = run[1] + i * bay
+					detail(m, Vector3.new(0.6, 12.6, 0.4), place(rib, 0.2, 8.9), C.Metal, METAL)
+					glow(m, Vector3.new(0.14, 9, 0.08), place(rib, 0.44, 8.9), side.accent)
+				end
+			end
+		end
+	end
+end
+
+-- Arena name over the center line of a side wall (inner face at z = zFace), framed by gold and both team colors.
+local function nameplate(m: Model, O: CFrame, zFace: number, inward: Vector3, name: string)
+	local function at(x: number, depth: number, y: number): CFrame
+		local p = Vector3.new(x, y, zFace) + inward * depth
+		return O * CFrame.lookAt(p, p + inward)
+	end
+	detail(m, Vector3.new(11.4, 12.6, 0.2), at(0, 0.1, 8.9), DARK, METAL)
+	glow(m, Vector3.new(0.3, 8, 0.12), at(0, 0.26, 6.6), C.Gold)
+	for _, side in SIDES do
+		local x = side.dir * 6
+		detail(m, Vector3.new(0.8, 12.6, 0.5), at(x, 0.25, 8.9), C.Metal, METAL)
+		glow(m, Vector3.new(0.16, 10, 0.1), at(x, 0.55, 8.9), side.accent)
+	end
+	glow(m, Vector3.new(9.6, 3, 0.2), at(0, 0.3, 12.6), C.Gold)
+	local label = Props.sign(m, at(0, 0.45, 12.6).Position, inward, Vector2.new(9, 2.4), string.upper(name), C.Gold)
+	local board = label:FindFirstAncestorWhichIsA("BasePart")
+	if board and board:IsA("BasePart") then
+		Props.decor(board)
+		board.CastShadow = false
+	end
+end
+
+-- Spawn gate in the middle of an end wall (inner face at x = xFace): glass window over neon bars, a lit sill
+-- (the spawn marker's light), solid pilasters and a header whose light bar fills the arena toward the far end.
+local function spawnGate(m: Model, O: CFrame, xFace: number, side)
+	local inward = Vector3.new(-side.dir, 0, 0)
+	local function at(z: number, depth: number, y: number): CFrame
+		local p = Vector3.new(xFace, y, z) + inward * depth
+		return O * CFrame.lookAt(p, p + inward)
+	end
+	detail(m, Vector3.new(17, 12.6, 0.2), at(0, 0.1, 8.9), DARK, METAL)
+	for i = -1, 1 do
+		glow(m, Vector3.new(10, 0.3, 0.1), at(0, 0.25, 7.5 + i * 2.2), side.accent)
+	end
+	local glass = detail(m, Vector3.new(12, 8, 0.2), at(0, 0.5, 7.5), side.accent:Lerp(DARK, 0.65), GLASS)
+	glass.Transparency = 0.45
+	local sill = glow(m, Vector3.new(12.6, 0.3, 0.5), at(0, 0.35, 3.3), side.accent)
+	Props.pointLight(sill, side.accent, 16, 1.4)
+	for _, s in { -1, 1 } do
+		solid(m, Vector3.new(1.4, 14.6, 1), at(s * 8.5, 0.5, 7.3), C.Metal, "Wall", METAL)
+		glow(m, Vector3.new(0.25, 11, 0.1), at(s * 8.5, 1.05, 7.8), side.accent)
+	end
+	detail(m, Vector3.new(18.4, 1.2, 1), at(0, 0.5, 15.2), C.Metal, METAL)
+	local bar = glow(m, Vector3.new(12, 0.3, 0.12), at(0, 1.06, 15.2), side.lamp)
+	local fill = Instance.new("SurfaceLight")
+	fill.Face = Enum.NormalId.Front
+	fill.Color = side.lamp
+	fill.Brightness = 0.9
+	fill.Range = 60
+	fill.Angle = 120
+	fill.Shadows = false
+	fill.Parent = bar
+end
+
+-- Outer shell (floor halves are built with the floor): four walls from under the floor up to the ceiling and a
+-- ceiling slab that overlaps their tops, so there is no gap to the outside anywhere. Then all wall dressing.
+local function buildShell(m: Model, O: CFrame, sx: number, sz: number, name: string)
+	for _, s in { -1, 1 } do
+		solid(m, Vector3.new(sx + 2, HEIGHT + 1, 1), O * CFrame.new(0, HEIGHT / 2 - 0.5, s * (sz / 2 + 0.5)), WALL, "Wall", METAL)
+		solid(m, Vector3.new(1, HEIGHT + 1, sz), O * CFrame.new(s * (sx / 2 + 0.5), HEIGHT / 2 - 0.5, 0), WALL, "Wall", METAL)
+	end
+	solid(m, Vector3.new(sx + 2, 1, sz + 2), O * CFrame.new(0, HEIGHT + 0.5, 0), CEILING, "Ceiling", METAL)
+
+	for _, side in SIDES do
+		local d = side.dir
+		-- Side walls, one dressed run per half; the 12 studs around the center line hold the nameplate.
+		for _, zs in { -1, 1 } do
+			local face = zs * sz / 2
+			dressWall(m, O, Vector3.new(0, 0, face), Vector3.new(d * sx / 2, 0, face), Vector3.new(0, 0, -zs), side, { { 0, 6 } })
+		end
+		-- End wall behind this side's spawn, with the spawn gate in the middle.
+		local xFace = d * sx / 2
+		dressWall(m, O, Vector3.new(xFace, 0, -sz / 2), Vector3.new(xFace, 0, sz / 2), Vector3.new(-d, 0, 0), side, { { sz / 2 - 9, sz / 2 + 9 } })
+		spawnGate(m, O, xFace, side)
+		-- Corner columns with a neon strip on their inner edge.
+		for _, zs in { -1, 1 } do
+			solid(m, Vector3.new(1.6, HEIGHT, 1.6), O * CFrame.new(d * (sx / 2 - 0.8), HEIGHT / 2, zs * (sz / 2 - 0.8)), C.Metal, "Wall", METAL)
+			glow(m, Vector3.new(0.3, HEIGHT - 6, 0.3), O * CFrame.new(d * (sx / 2 - 1.6), HEIGHT / 2, zs * (sz / 2 - 1.6)), side.accent)
+		end
+	end
+	for _, zs in { -1, 1 } do
+		nameplate(m, O, zs * sz / 2, Vector3.new(0, 0, -zs), name)
+		-- Service pipes along the top of the long walls.
+		for k, depth in { 1.3, 2.1 } do
+			pipe(m, sx, 0.6, O * CFrame.new(0, HEIGHT - 0.5 - k * 0.15, zs * (sz / 2 - depth)), PIPE)
+		end
+	end
+end
+
+---------------------------------------------------------------- floor and ceiling
+
+-- Floor halves (top at y = 0) with flush tile seams, a plated edge trim with a neon line, and the gold center
+-- line in a metal channel. Every floor detail tops out at or below y = 0.04, under the collapse ring.
+local function buildFloor(m: Model, O: CFrame, sx: number, sz: number)
+	for _, side in SIDES do
+		local d = side.dir
+		solid(m, Vector3.new(sx / 2, 1, sz), O * CFrame.new(d * sx / 4, -0.5, 0), side.floor, "Floor")
+		for i = 1, math.floor((sx / 2 - 1) / 10) do
+			detail(m, Vector3.new(0.12, 0.02, sz), O * CFrame.new(d * i * 10, 0.01, 0), side.grid)
+		end
+		local nz = math.floor((sz / 2 - 1) / 10)
+		for i = -nz, nz do
+			detail(m, Vector3.new(sx / 2, 0.02, 0.12), O * CFrame.new(d * sx / 4, 0.01, i * 10), side.grid)
+		end
+		detail(m, Vector3.new(1.6, 0.03, sz), O * CFrame.new(d * (sx / 2 - 0.8), 0.015, 0), C.Metal, PLATE)
+		glow(m, Vector3.new(0.15, 0.04, sz - 3.2), O * CFrame.new(d * (sx / 2 - 1.675), 0.02, 0), side.accent)
+		local runLen = sx / 2 - 1.6
+		local neonLen = runLen - 0.7
+		for _, zs in { -1, 1 } do
+			detail(m, Vector3.new(runLen, 0.03, 1.6), O * CFrame.new(d * runLen / 2, 0.015, zs * (sz / 2 - 0.8)), C.Metal, PLATE)
+			glow(m, Vector3.new(neonLen, 0.04, 0.15), O * CFrame.new(d * (0.7 + neonLen / 2), 0.02, zs * (sz / 2 - 1.675)), side.accent)
+		end
+	end
+	detail(m, Vector3.new(1.4, 0.026, sz), O * CFrame.new(0, 0.013, 0), C.Metal, PLATE)
+	local line = glow(m, Vector3.new(0.4, 0.04, sz), O * CFrame.new(0, 0.02, 0), C.Gold)
+	line.Name = "CenterLine"
+end
+
+-- Ceiling: a 4-column grid of coffers, each with a housed light panel, split by beams with neon undersides
+-- (gold over the center line) on wall brackets. The panels nearest the center cast shadows (at most 4).
+local function buildCeiling(m: Model, O: CFrame, sx: number, sz: number)
+	local nc, nr = 4, math.max(1, math.round(sz / 30))
+	local cw, cd = sx / nc, sz / nr
+	for i = 1, nc - 1 do
+		local x = -sx / 2 + i * cw
+		detail(m, Vector3.new(1.6, 1.4, sz), O * CFrame.new(x, HEIGHT - 0.7, 0), BEAM, METAL)
+		glow(m, Vector3.new(0.3, 0.08, sz - 2), O * CFrame.new(x, HEIGHT - 1.44, 0), if i * 2 == nc then C.Gold else LAMP)
+		for _, s in { -1, 1 } do
+			local p = Vector3.new(x, HEIGHT - 2, s * (sz / 2 - 1.05))
+			wedge(m, Vector3.new(1.6, 1.2, 1.2), O * CFrame.lookAt(p, p - Vector3.new(0, 0, s), -UP), BEAM)
+		end
+	end
+	for j = 1, nr - 1 do
+		local z = -sz / 2 + j * cd
+		detail(m, Vector3.new(sx, 1, 1.4), O * CFrame.new(0, HEIGHT - 0.5, z), BEAM, METAL)
+		glow(m, Vector3.new(sx - 2, 0.08, 0.3), O * CFrame.new(0, HEIGHT - 1.04, z), LAMP)
+		for _, s in { -1, 1 } do
+			local p = Vector3.new(s * (sx / 2 - 0.95), HEIGHT - 1.5, z)
+			wedge(m, Vector3.new(1.4, 1, 1), O * CFrame.lookAt(p, p - Vector3.new(s, 0, 0), -UP), BEAM)
+		end
+	end
+	local w, d = cw * 0.28, cd * 0.45
+	for i = 1, nc do
+		for j = 1, nr do
+			local x = -sx / 2 + (i - 0.5) * cw
+			local z = -sz / 2 + (j - 0.5) * cd
+			local side = if x < 0 then SIDES[1] else SIDES[2]
+			detail(m, Vector3.new(cw - 3, 0.12, cd - 3), O * CFrame.new(x, HEIGHT - 0.06, z), COFFER, METAL)
+			detail(m, Vector3.new(w + 0.8, 0.5, d + 0.8), O * CFrame.new(x, HEIGHT - 0.25, z), C.Metal, METAL)
+			lamp(m, O * CFrame.new(x, HEIGHT - 0.6, z), Vector3.new(w, 0.2, d), side.lamp, math.abs(x) < cw and math.abs(z) < cd)
+		end
+	end
+end
+
+-- Lit spawn marker on the floor around one team's two spawn points (x, 0, +-4): a plated zone with a neon frame,
+-- two glowing pads and a chevron toward the center. The light is the gate sill on the wall behind it.
+local function spawnMarker(m: Model, O: CFrame, x: number, side)
+	detail(m, Vector3.new(6, 0.03, 15), O * CFrame.new(x, 0.015, 0), C.Metal, PLATE)
+	for _, s in { -1, 1 } do
+		glow(m, Vector3.new(0.2, 0.04, 15.4), O * CFrame.new(x + s * 3.1, 0.02, 0), side.accent)
+		glow(m, Vector3.new(6.4, 0.04, 0.2), O * CFrame.new(x, 0.02, s * 7.6), side.accent)
+		local c = O.Position + Vector3.new(x, 0, s * 4)
+		round(m, c + Vector3.new(0, 0.02, 0), 3.4, 0.04, side.accent, NEON)
+		round(m, c + Vector3.new(0, 0.0225, 0), 2.6, 0.045, C.Metal, METAL)
+		round(m, c + Vector3.new(0, 0.025, 0), 0.8, 0.05, side.accent, NEON)
+	end
+	local dir = Vector3.new(-side.dir, 0, 0)
+	local tip = Vector3.new(x, 0.02, 0) + dir * 1.2
+	for _, s in { -1, 1 } do
+		local tail = tip - dir * 1.2 + Vector3.new(0, 0, s * 1.2)
+		glow(m, Vector3.new(0.3, 0.04, (tip - tail).Magnitude + 0.3), O * CFrame.lookAt((tip + tail) / 2, tip), side.accent)
+	end
+end
+
+---------------------------------------------------------------- cover
+
+-- Decor for one cover box (center cf, size). Every piece lies on the box, at most OUT (0.08) proud of its surface.
+-- Heights below are measured from the bottom of the box.
+local function dressBox(m: Model, cf: CFrame, size: Vector3, style: string, look)
+	local hx, hy, hz = size.X / 2, size.Y / 2, size.Z / 2
+	local h = size.Y
+	local function at(x: number, y: number, z: number): CFrame
+		return cf * CFrame.new(x, y - hy, z)
+	end
+	local function make(s: Vector3, c: CFrame, color: Color3, material: Enum.Material?): Part
+		if material == NEON then
+			return glow(m, s, c, color)
+		end
+		return detail(m, s, c, color, material)
+	end
+	-- Sleeve around all four sides from y0 to y1, `out` proud of them (a lid when it reaches past the top).
+	local function sleeve(y0: number, y1: number, out: number, color: Color3, material: Enum.Material?): Part
+		return make(Vector3.new(size.X + 2 * out, y1 - y0, size.Z + 2 * out), at(0, (y0 + y1) / 2, 0), color, material)
+	end
+	-- Strip through the box: along X at z = offset (shows on both X faces) or along Z at x = offset (both Z faces).
+	local function strip(alongX: boolean, offset: number, w: number, y0: number, y1: number, out: number, color: Color3, material: Enum.Material?): Part
+		if alongX then
+			return make(Vector3.new(size.X + 2 * out, y1 - y0, w), at(0, (y0 + y1) / 2, offset), color, material)
+		end
+		return make(Vector3.new(w, y1 - y0, size.Z + 2 * out), at(offset, (y0 + y1) / 2, 0), color, material)
+	end
+	local function topPlate(inset: number)
+		detail(m, Vector3.new(size.X - inset, 0.04, size.Z - inset), at(0, h + 0.06, 0), look.top, PLATE)
+	end
+
+	if style == "crate" then
+		-- Skirt, lid, corner posts, a neon band under the lid, cross seams on every face and a plated top.
+		sleeve(0, 0.6, OUT, look.trim, METAL)
+		sleeve(h - 0.36, h + 0.04, OUT, look.trim, METAL)
+		topPlate(0.8)
+		for _, px in { -1, 1 } do
+			for _, pz in { -1, 1 } do
+				local c = at(px * (hx - 0.225 + OUT), (0.6 + h - 0.36) / 2, pz * (hz - 0.225 + OUT))
+				detail(m, Vector3.new(0.45, h - 0.96, 0.45), c, look.trim, METAL)
+			end
+		end
+		sleeve(h - 0.75, h - 0.59, 0.06, look.accent, NEON)
+		strip(true, 0, 0.14, 0.6, h - 0.36, 0.04, look.trim, METAL)
+		strip(false, 0, 0.14, 0.6, h - 0.36, 0.04, look.trim, METAL)
+	elseif style == "pillar" then
+		-- Base, middle and cap collars, two neon rings and neon fins up the middle of every face.
+		local mid = h / 2
+		sleeve(0, 0.9, OUT, look.trim, METAL)
+		sleeve(mid - 0.25, mid + 0.25, OUT, look.trim, METAL)
+		sleeve(h - 0.7, h + 0.04, OUT, look.trim, METAL)
+		sleeve(1.1, 1.28, 0.06, look.accent, NEON)
+		sleeve(h - 1.08, h - 0.9, 0.06, look.accent, NEON)
+		-- The fins run behind the middle collar, which stands further out and hides them there.
+		strip(true, 0, 0.22, 1.28, h - 1.08, 0.05, look.accent, NEON)
+		strip(false, 0, 0.22, 1.28, h - 1.08, 0.05, look.accent, NEON)
+		if math.min(size.X, size.Z) >= 3 then
+			topPlate(0.8)
+		end
+	elseif style == "platform" then
+		-- Skirt, lid with a plated deck, a neon rail, panels on every face and a hazard patch on both X faces.
+		sleeve(0, 0.5, OUT, look.trim, METAL)
+		sleeve(h - 0.36, h + 0.04, OUT, look.trim, METAL)
+		topPlate(1.2)
+		sleeve(1.1, 1.26, 0.07, look.accent, NEON)
+		for _, alongX in { true, false } do
+			local inner = (if alongX then size.Z else size.X) - 1
+			local n = math.max(1, math.round(inner / 4))
+			local bay = inner / n
+			for i = 1, n do
+				strip(alongX, -inner / 2 + (i - 0.5) * bay, bay - 0.3, 0.62, h - 0.48, 0.03, look.panel, METAL)
+			end
+		end
+		if h >= 2.5 and size.Z >= 6 then
+			-- Diagonal stripes on a dark backing; their tips tuck into the skirt (below) and the neon rail (above).
+			strip(true, 0, 5.2, 0.5, 1.1, 0.045, C.Metal, METAL)
+			for k = 1, 6 do
+				local c = at(0, 0.8, (k - 3.5) * 0.8) * CFrame.Angles(math.rad(45), 0, 0)
+				detail(m, Vector3.new(size.X + 0.12, 0.85, 0.3), c, C.Gold)
+			end
+		end
+	else
+		-- "wall" / "shield": kick base, cap, end posts, panels on both faces and a neon line under the cap.
+		-- The shield also carries a neon diamond emblem in its team color.
+		local alongX = size.X >= size.Z
+		local length = if alongX then size.X else size.Z
+		local thick = if alongX then size.Z else size.X
+		local function piece(lenA: number, y0: number, y1: number, out: number, a: number, color: Color3, material: Enum.Material?): Part
+			if alongX then
+				return make(Vector3.new(lenA, y1 - y0, thick + 2 * out), at(a, (y0 + y1) / 2, 0), color, material)
+			end
+			return make(Vector3.new(thick + 2 * out, y1 - y0, lenA), at(0, (y0 + y1) / 2, a), color, material)
+		end
+		sleeve(0, 0.8, OUT, look.trim, METAL)
+		sleeve(h - 0.5, h + 0.06, OUT, look.trim, METAL)
+		for _, s in { -1, 1 } do
+			piece(0.5, 0.8, h - 0.5, OUT, s * (length / 2 - 0.25 + OUT), look.trim, METAL)
+		end
+		local inner = length - 2 * (0.5 - OUT) - 0.3
+		local n = math.max(1, math.round(inner / 4.5))
+		local bay = inner / n
+		for i = 1, n do
+			piece(bay - 0.3, 1.05, h - 0.75, 0.035, -inner / 2 + (i - 0.5) * bay, look.panel, METAL)
+		end
+		piece(length - 1.2, h - 1.18, h - 1.02, 0.06, 0, look.accent, NEON)
+		if style == "shield" then
+			local y = (1.05 + h - 1.18) / 2
+			local turn = if alongX then CFrame.Angles(0, 0, math.rad(45)) else CFrame.Angles(math.rad(45), 0, 0)
+			local function diamond(edge: number, out: number, color: Color3, material: Enum.Material)
+				local s = if alongX then Vector3.new(edge, edge, thick + 2 * out) else Vector3.new(thick + 2 * out, edge, edge)
+				make(s, at(0, y, 0) * turn, color, material)
+			end
+			diamond(1.8, 0.06, look.accent, NEON)
+			diamond(1.1, 0.07, look.trim, METAL)
+		end
+	end
+end
+
+-- One layout box: the exact collision volume (blocks movement, shots and line of sight) plus its decor.
+local function cover(m: Model, cf: CFrame, size: Vector3, style: string, look)
+	solid(m, size, cf, look.box, "Cover")
+	dressBox(m, cf, size, style, look)
+end
+
+---------------------------------------------------------------- arenas
+
 local Arena = {}
 local usedSlots = {}
-
 
 function Arena.create(map: Instance): { [string]: any }
 	local slot = 1
@@ -901,22 +1392,27 @@ function Arena.create(map: Instance): { [string]: any }
 	usedSlots[slot] = true
 	local layout = LAYOUTS[math.random(#LAYOUTS)]
 	local origin = Vector3.new(1000 + 500 * slot, 0, 0)
+	local O = CFrame.new(origin)
 	local model = Instance.new("Model")
 	model.Name = "Arena" .. slot
 	local sx, sz = layout.size[1], layout.size[2]
-	Props.block(model, Vector3.new(sx / 2, 1, sz), CFrame.new(origin + Vector3.new(-sx / 4, -0.5, 0)), C.Light, "Floor")
-	Props.block(model, Vector3.new(sx / 2, 1, sz), CFrame.new(origin + Vector3.new(sx / 4, -0.5, 0)), C.Dark, "Floor")
-	Props.block(model, Vector3.new(0.4, 0.05, sz), CFrame.new(origin + Vector3.new(0, 0.025, 0)), C.Gold, "CenterLine")
-	Props.walls(model, origin, sx, sz, 20, GRAY)
+	local s = layout.spawnX
 
-	for _, b in layout.boxes do
+	buildShell(model, O, sx, sz, layout.name)
+	buildFloor(model, O, sx, sz)
+	buildCeiling(model, O, sx, sz)
+	for _, side in SIDES do
+		spawnMarker(model, O, side.dir * s, side)
+	end
+	for i, b in layout.boxes do
 		local size = Vector3.new(b[3], b[4], b[5])
 		local y = (b[6] or 0) + b[4] / 2
+		local style = layout.styles[i] or "crate"
 		if b[1] == 0 then
-			Props.block(model, size, CFrame.new(origin + Vector3.new(0, y, b[2])), GRAY)
+			cover(model, O * CFrame.new(0, y, b[2]), size, style, CENTER)
 		else
-			Props.block(model, size, CFrame.new(origin + Vector3.new(b[1], y, b[2])), C.Dark)
-			Props.block(model, size, CFrame.new(origin + Vector3.new(-b[1], y, b[2])), C.Light)
+			cover(model, O * CFrame.new(b[1], y, b[2]), size, style, SIDES[1])
+			cover(model, O * CFrame.new(-b[1], y, b[2]), size, style, SIDES[2])
 		end
 	end
 
@@ -924,7 +1420,6 @@ function Arena.create(map: Instance): { [string]: any }
 		local pos = origin + Vector3.new(x, 3, z)
 		return CFrame.lookAt(pos, pos + Vector3.new(-math.sign(x), 0, 0))
 	end
-	local s = layout.spawnX
 	model.Parent = map
 	return {
 		slot = slot,
@@ -2486,7 +2981,12 @@ return Props
       <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">Range</string>
-          <string name="Source"><![CDATA[-- The separate firing range room (first person + weapons) with target dummies and a pad back to the lobby.
+          <string name="Source"><![CDATA[-- The separate firing range room (first person + weapons): a fully closed sci-fi hall with a lit firing-line
+-- booth, a distance-marked lane, detailed training bots and a portal pad back to the lobby.
+--
+-- Shot safety: between the player area and the bots nothing taller than the 1-stud counters collides or is
+-- queryable. Everything decorative goes through Props.decor, so only the floor, walls, ceiling, counters and
+-- the bots' hit parts can stop a ray.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Props = require(script.Parent.Props)
@@ -2495,25 +2995,170 @@ local C = Config.Colors
 local L = Config.Lobby
 local R = L.HubRadius
 local WALL_H = 24
+local DISTANCES = { 15, 30, 45, 60, 75 } -- bot distances from the firing line
+local OFFSETS = { -10, 8, -4, 10, 0 } -- bot x offsets, one per distance
+local MARKS = { 0, 15, 30, 45, 60, 75 } -- wall pilasters / ceiling ribs (firing line + each distance)
 local Range = {}
 
+local METAL = Enum.Material.Metal
+local PLATE = Enum.Material.DiamondPlate
+local NEON = Enum.Material.Neon
+local GLASS = Enum.Material.Glass
+
+local DEEP = Color3.fromRGB(17, 18, 23) -- recessed panel insets
+local LANE = Color3.fromRGB(21, 23, 28)
+local BOT = Color3.fromRGB(72, 76, 88) -- bot body (hit parts)
+local STEEL = Color3.fromRGB(98, 102, 116) -- bot armor plates
+local LAMP = Color3.fromRGB(214, 230, 255) -- cool white ceiling light
+local SCREEN = Color3.fromRGB(16, 66, 84) -- dim holo screens
+local VISOR = Color3.fromRGB(12, 18, 26)
+local PORTAL = Color3.fromRGB(34, 16, 52)
+local BOOTH_GLASS = Color3.fromRGB(96, 160, 190)
+
+local UP = CFrame.Angles(0, 0, math.rad(90)) -- turns a cylinder's axis vertical
+local ALONG_Z = CFrame.Angles(0, math.rad(90), 0) -- turns a cylinder's axis along Z
+
+---------------------------------------------------------------- helpers
+
+-- Visual-only block: never collides, blocks shots or triggers touches.
+local function deco(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?): Part
+	local p = Props.block(parent, size, cf, color, "Decor", material or METAL)
+	Props.decor(p)
+	return p
+end
+
+local function glow(parent: Instance, size: Vector3, cf: CFrame, color: Color3): Part
+	local p = Props.neon(parent, size, cf, color)
+	Props.decor(p)
+	return p
+end
+
+-- Decor cylinder; its axis is the CFrame's X axis (use UP / ALONG_Z to turn it).
+local function cylinder(parent: Instance, length: number, diameter: number, cf: CFrame, color: Color3, material: Enum.Material?): Part
+	local p = deco(parent, Vector3.new(length, diameter, diameter), cf, color, material)
+	p.Shape = Enum.PartType.Cylinder
+	if material == NEON then
+		p.CastShadow = false
+	end
+	return p
+end
+
+local function ball(parent: Instance, diameter: number, pos: Vector3, color: Color3): Part
+	local p = glow(parent, Vector3.new(diameter, diameter, diameter), CFrame.new(pos), color)
+	p.Shape = Enum.PartType.Ball
+	return p
+end
+
+-- Decor wedge whose slope faces the horizontal `dir`; `flip` hangs it upside down (a bracket under a beam).
+local function wedge(parent: Instance, size: Vector3, center: Vector3, dir: Vector3, color: Color3, flip: boolean?, material: Enum.Material?): WedgePart
+	local w = Instance.new("WedgePart")
+	w.Name = "Decor"
+	w.Anchored = true
+	w.Size = size
+	w.CFrame = CFrame.lookAt(center, center + dir) * (if flip then CFrame.Angles(0, 0, math.pi) else CFrame.identity)
+	w.Color = color
+	w.Material = material or METAL
+	w.TopSurface = Enum.SurfaceType.Smooth
+	w.BottomSurface = Enum.SurfaceType.Smooth
+	Props.decor(w)
+	w.Parent = parent
+	return w
+end
+
+-- Decor sign (Props.sign makes a solid one).
+local function sign(parent: Instance, pos: Vector3, facing: Vector3, size: Vector2, text: string, color: Color3?): TextLabel
+	local label = Props.sign(parent, pos, facing, size, text, color)
+	local gui = label.Parent
+	local part = gui and gui.Parent
+	if part and part:IsA("BasePart") then
+		Props.decor(part)
+	end
+	return label
+end
+
+-- Ceiling light panel (decor) with a chosen shadow setting.
+local function panel(parent: Instance, cf: CFrame, size: Vector3, brightness: number, range: number, shadows: boolean): Part
+	local p = Props.lightPanel(parent, cf, size, LAMP, brightness, range)
+	Props.decor(p)
+	local light = p:FindFirstChildOfClass("SurfaceLight")
+	if light then
+		light.Shadows = shadows
+	end
+	return p
+end
+
+local function washLight(part: BasePart, face: Enum.NormalId, color: Color3, range: number, brightness: number)
+	local light = Instance.new("SurfaceLight")
+	light.Face = face
+	light.Color = color
+	light.Range = range
+	light.Brightness = brightness
+	light.Angle = 110
+	light.Shadows = false
+	light.Parent = part
+end
+
+---------------------------------------------------------------- training bot
+
+-- Hitbox contract (Combat): anchored R6-sized parts with the exact names, sizes and offsets below,
+-- a Humanoid that Combat damages/refills, PrimaryPart facing +Z. Every extra part is decor (CanQuery = false)
+-- and sits at most ~0.15 studs proud of the hit parts, so what you see is what you hit.
 local function dummy(parent: Instance, pos: Vector3)
 	local m = Instance.new("Model")
 	m.Name = "Dummy"
-	local function limb(name, size, offset, color)
-		return Props.block(m, size, CFrame.new(pos + offset), color, name)
+	local function at(x: number, y: number, z: number): CFrame
+		return CFrame.new(pos + Vector3.new(x, y, z))
 	end
-	local root = limb("HumanoidRootPart", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0), C.Dark)
+	local function limb(name: string, size: Vector3, offset: Vector3, color: Color3): Part
+		return Props.block(m, size, CFrame.new(pos + offset), color, name, METAL)
+	end
+	local root = Props.block(m, Vector3.new(2, 2, 1), CFrame.new(pos + Vector3.new(0, 3, 0)), C.Dark, "HumanoidRootPart")
 	root.CFrame = CFrame.lookAt(root.Position, root.Position + Vector3.new(0, 0, 1)) -- faces the firing line
 	root.Transparency = 1
 	root.CanQuery = false
 	root.CanCollide = false
-	limb("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0), C.Enemy)
-	limb("Head", Vector3.new(2, 1, 1), Vector3.new(0, 4.5, 0), C.Light)
-	limb("Left Arm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0), C.Dark)
-	limb("Right Arm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0), C.Dark)
-	limb("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0), C.Dark)
-	limb("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0), C.Dark)
+	limb("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0), BOT)
+	limb("Head", Vector3.new(2, 1, 1), Vector3.new(0, 4.5, 0), BOT)
+	limb("Left Arm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0), C.MetalLight)
+	limb("Right Arm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0), C.MetalLight)
+	limb("Left Leg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0), C.MetalLight)
+	limb("Right Leg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0), C.MetalLight)
+
+	-- Stand: base plate with a glow ring, and a support post clamped to the back unit.
+	cylinder(m, 0.25, 3.6, at(0, 0.125, 0) * UP, C.Metal)
+	cylinder(m, 0.08, 4, at(0, 0.04, 0) * UP, C.Enemy, NEON)
+	deco(m, Vector3.new(0.4, 2.35, 0.4), at(0, 1.425, -0.95), C.Metal)
+	deco(m, Vector3.new(0.6, 0.45, 0.4), at(0, 2.35, -0.75), STEEL)
+
+	-- Torso armor: chest plate + reactor core, abdomen plate, waist band, back power unit with spine light.
+	deco(m, Vector3.new(1.7, 1.05, 0.08), at(0, 3.4, 0.54), STEEL)
+	cylinder(m, 0.06, 0.55, at(0, 3.4, 0.61) * ALONG_Z, C.Enemy, NEON)
+	deco(m, Vector3.new(1.2, 0.5, 0.06), at(0, 2.55, 0.53), C.Metal)
+	glow(m, Vector3.new(2.04, 0.12, 1.04), at(0, 2.12, 0), C.Enemy)
+	deco(m, Vector3.new(1.4, 1.3, 0.12), at(0, 3.15, -0.56), STEEL)
+	glow(m, Vector3.new(0.14, 0.9, 0.03), at(0, 3.2, -0.635), C.Enemy)
+
+	-- Head: glass visor with glowing eyes, jaw grille, crest, ear pods and an antenna.
+	deco(m, Vector3.new(1.8, 0.5, 0.06), at(0, 4.6, 0.53), VISOR, GLASS)
+	glow(m, Vector3.new(0.34, 0.14, 0.05), at(-0.42, 4.6, 0.585), C.Enemy)
+	glow(m, Vector3.new(0.34, 0.14, 0.05), at(0.42, 4.6, 0.585), C.Enemy)
+	deco(m, Vector3.new(0.9, 0.18, 0.05), at(0, 4.2, 0.525), C.Metal)
+	deco(m, Vector3.new(0.36, 0.12, 1.04), at(0, 5.06, 0), STEEL)
+	cylinder(m, 0.9, 0.08, at(0.7, 5.45, -0.25) * UP, C.Metal)
+	ball(m, 0.22, pos + Vector3.new(0.7, 5.95, -0.25), C.Enemy)
+
+	for _, s in { -1, 1 } do
+		cylinder(m, 0.12, 0.62, at(s * 1.06, 4.5, 0), STEEL) -- ear pod
+		-- arms: shoulder pad, forearm guard, wrist light
+		deco(m, Vector3.new(1.2, 0.55, 1.2), at(s * 1.55, 3.76, 0), STEEL)
+		deco(m, Vector3.new(1.1, 0.7, 1.1), at(s * 1.5, 2.6, 0), STEEL)
+		glow(m, Vector3.new(1.06, 0.1, 1.06), at(s * 1.5, 2.12, 0), C.Enemy)
+		-- legs: thigh plate, knee guard, boot
+		deco(m, Vector3.new(0.7, 0.5, 0.06), at(s * 0.5, 1.65, 0.53), C.Metal)
+		deco(m, Vector3.new(0.84, 0.4, 0.1), at(s * 0.5, 1.15, 0.55), STEEL)
+		deco(m, Vector3.new(1.06, 0.4, 1.2), at(s * 0.53, 0.45, 0.05), C.Metal)
+	end
+
 	local hum = Instance.new("Humanoid")
 	hum.RequiresNeck = false -- anchored, unjointed limbs; otherwise the Humanoid dies on spawn
 	hum.Parent = m
@@ -2522,34 +3167,241 @@ local function dummy(parent: Instance, pos: Vector3)
 	m.Parent = parent
 end
 
+---------------------------------------------------------------- room
+
+-- Floor, four walls and a ceiling at WALL_H: fully closed, no sky anywhere.
+local function buildShell(parent: Instance, c: Vector3, size: Vector3)
+	Props.block(parent, Vector3.new(size.X + 2, 1, size.Z + 2), CFrame.new(c.X, -0.5, c.Z), C.Metal, "RangeFloor", PLATE)
+	Props.block(parent, Vector3.new(size.X + 2, 1, size.Z + 2), CFrame.new(c.X, WALL_H + 0.5, c.Z), C.Metal, "RangeCeiling", METAL)
+	for _, s in { -1, 1 } do
+		Props.block(parent, Vector3.new(size.X + 2, WALL_H, 1), CFrame.new(c.X, WALL_H / 2, c.Z + s * (size.Z / 2 + 0.5)), C.Metal, "RangeWall", METAL)
+		Props.block(parent, Vector3.new(1, WALL_H, size.Z), CFrame.new(c.X + s * (size.X / 2 + 0.5), WALL_H / 2, c.Z), C.Metal, "RangeWall", METAL)
+	end
+end
+
+-- Flat floor graphics: player-area plating, the lane, its edges, the gold firing line and distance lines.
+local function buildFloor(parent: Instance, c: Vector3, size: Vector3, front: number, back: number, line: number)
+	deco(parent, Vector3.new(size.X, 0.04, front - line), CFrame.new(c.X, 0.02, (front + line) / 2), C.MetalLight, PLATE)
+	local laneLen, laneZ = line - back, (line + back) / 2
+	local lane = deco(parent, Vector3.new(30, 0.05, laneLen), CFrame.new(c.X, 0.025, laneZ), LANE, Enum.Material.SmoothPlastic)
+	lane.Name = "RangeLane"
+	for _, s in { -1, 1 } do
+		glow(parent, Vector3.new(0.22, 0.07, laneLen), CFrame.new(c.X + s * 15, 0.035, laneZ), C.Ally)
+	end
+	glow(parent, Vector3.new(size.X, 0.08, 0.5), CFrame.new(c.X, 0.04, line), C.Gold)
+	for _, d in DISTANCES do
+		glow(parent, Vector3.new(30, 0.07, 0.22), CFrame.new(c.X, 0.035, line - d), C.Ally)
+	end
+end
+
+-- Firing-line booth: four low counters (with gaps to walk downrange), a lit canopy, glass side screens
+-- and a hanging FIRING LINE header. Only the 1-stud counter bases are solid.
+local function buildBooth(parent: Instance, c: Vector3, front: number, line: number)
+	local cz = line + 1.3
+	for i, x in { -12, -4, 4, 12 } do
+		local px = c.X + x
+		Props.block(parent, Vector3.new(5, 1, 1.4), CFrame.new(px, 0.5, cz), C.MetalLight, "Counter", METAL)
+		deco(parent, Vector3.new(5.3, 0.14, 1.7), CFrame.new(px, 1.07, cz - 0.1), C.Metal)
+		glow(parent, Vector3.new(5.3, 0.08, 0.08), CFrame.new(px, 1.0, cz - 0.99), C.Gold)
+		sign(parent, Vector3.new(px, 0.55, cz + 0.9), Vector3.new(0, 0, 1), Vector2.new(2.4, 0.6), "LANE " .. i, C.Ally)
+		-- tilted holo screen facing the shooter
+		deco(parent, Vector3.new(0.18, 0.5, 0.18), CFrame.new(px + 1.6, 1.39, cz), C.Metal)
+		local screen = CFrame.new(px + 1.6, 1.95, cz) * CFrame.Angles(math.rad(-20), 0, 0)
+		deco(parent, Vector3.new(1.5, 0.95, 0.08), screen, C.Metal)
+		glow(parent, Vector3.new(1.3, 0.75, 0.04), screen * CFrame.new(0, 0, 0.06), SCREEN)
+	end
+
+	-- Canopy over the shooting stalls with two shadow-casting key lights.
+	local edge = line - 1
+	local mid = (front + edge) / 2
+	deco(parent, Vector3.new(32, 0.8, front - edge), CFrame.new(c.X, 12.4, mid), C.Metal)
+	deco(parent, Vector3.new(32.4, 1.6, 0.5), CFrame.new(c.X, 12.2, edge - 0.25), C.MetalLight)
+	glow(parent, Vector3.new(32.4, 0.14, 0.12), CFrame.new(c.X, 11.33, edge - 0.25), C.Gold)
+	glow(parent, Vector3.new(32.4, 0.12, 0.12), CFrame.new(c.X, 13.06, edge - 0.25), C.Ally)
+	for _, s in { -1, 1 } do
+		local x = c.X + s * 8
+		deco(parent, Vector3.new(10, 0.1, 3.2), CFrame.new(x, 11.95, mid), DEEP)
+		panel(parent, CFrame.new(x, 11.86, mid), Vector3.new(9, 0.08, 2.4), 1.6, 16, true)
+
+		-- glass side screen + corner post
+		local gx = c.X + s * 15.6
+		deco(parent, Vector3.new(0.5, 0.8, 5), CFrame.new(gx, 0.4, line + 1.5), C.MetalLight)
+		local pane = deco(parent, Vector3.new(0.2, 11.2, 4.6), CFrame.new(gx, 6.4, line + 1.7), BOOTH_GLASS, GLASS)
+		pane.Transparency = 0.7
+		deco(parent, Vector3.new(0.5, 12, 0.5), CFrame.new(gx, 6, line - 0.75), C.MetalLight)
+		glow(parent, Vector3.new(0.12, 11, 0.12), CFrame.new(gx - s * 0.31, 6, line - 0.75), C.Ally)
+	end
+	for _, x in { -4.5, 4.5 } do
+		deco(parent, Vector3.new(0.12, 2.9, 0.12), CFrame.new(c.X + x, 10.55, line - 0.9), C.MetalLight)
+	end
+	sign(parent, Vector3.new(c.X, 8.6, line - 0.9), Vector3.new(0, 0, 1), Vector2.new(11, 1.3), "FIRING LINE", C.Gold)
+end
+
+-- Wall behind the players: plating, neon bands, inset panels and an info board.
+local function buildFrontWall(parent: Instance, c: Vector3, size: Vector3, front: number)
+	deco(parent, Vector3.new(size.X, 1, 0.5), CFrame.new(c.X, 0.5, front - 0.25), C.MetalLight, PLATE)
+	glow(parent, Vector3.new(size.X, 0.14, 0.12), CFrame.new(c.X, 1, front - 0.5), C.Ally)
+	glow(parent, Vector3.new(size.X, 0.14, 0.1), CFrame.new(c.X, 18, front - 0.05), C.Ally)
+	for _, x in { -10, 0, 10 } do
+		deco(parent, Vector3.new(9, 9, 0.2), CFrame.new(c.X + x, 6.2, front - 0.1), C.MetalLight)
+		deco(parent, Vector3.new(7.8, 7.8, 0.12), CFrame.new(c.X + x, 6.2, front - 0.26), DEEP)
+		glow(parent, Vector3.new(7, 0.14, 0.06), CFrame.new(c.X + x, 8.6, front - 0.35), C.Ally)
+	end
+	sign(parent, Vector3.new(c.X - 23, 7, front - 0.4), Vector3.new(0, 0, -1), Vector2.new(11, 3.2), "TRAINING BOTS\nThey reset when destroyed", C.Ally)
+	glow(parent, Vector3.new(11.5, 3.7, 0.1), CFrame.new(c.X - 23, 7, front - 0.15), C.Ally)
+end
+
+-- Return pad: glow pad, bezel, emitter nodes, a shimmering beam and a portal arch with the sign.
+local function buildReturnPad(parent: Instance, backPad: Vector3, front: number)
+	local ring = Props.glowPad(parent, backPad, C.Purple)
+	Props.pointLight(ring, C.Purple, 16, 1.2)
+	cylinder(parent, 0.1, 11.2, CFrame.new(backPad + Vector3.new(0, 0.05, 0)) * UP, C.MetalLight)
+	for k = 0, 3 do
+		local a = math.rad(45 + 90 * k)
+		local p = backPad + Vector3.new(math.cos(a) * 6.3, 0, math.sin(a) * 6.3)
+		cylinder(parent, 0.6, 0.9, CFrame.new(p + Vector3.new(0, 0.3, 0)) * UP, C.MetalLight)
+		cylinder(parent, 0.12, 0.6, CFrame.new(p + Vector3.new(0, 0.66, 0)) * UP, C.Purple, NEON)
+	end
+	local beam = cylinder(parent, 9, 8.2, CFrame.new(backPad + Vector3.new(0, 4.6, 0)) * UP, C.Purple, Enum.Material.ForceField)
+	beam.CastShadow = false
+
+	local ax = backPad.X
+	for _, s in { -1, 1 } do
+		deco(parent, Vector3.new(1.2, 11.6, 1.2), CFrame.new(ax + s * 6.8, 5.8, front - 0.6), C.MetalLight)
+		glow(parent, Vector3.new(0.18, 10.2, 0.18), CFrame.new(ax + s * 6.1, 5.2, front - 0.3), C.Purple)
+	end
+	deco(parent, Vector3.new(14.8, 1.2, 1.4), CFrame.new(ax, 11, front - 0.7), C.MetalLight)
+	glow(parent, Vector3.new(14.8, 0.14, 0.1), CFrame.new(ax, 10.5, front - 1.45), C.Purple)
+	glow(parent, Vector3.new(12.4, 0.18, 0.18), CFrame.new(ax, 10.2, front - 0.3), C.Purple)
+	deco(parent, Vector3.new(12.4, 10.4, 0.12), CFrame.new(ax, 5.2, front - 0.06), PORTAL)
+	sign(parent, Vector3.new(ax, 7.6, front - 0.4), Vector3.new(0, 0, -1), Vector2.new(12, 4), "BACK TO LOBBY", C.Purple)
+end
+
+-- Side walls: pilasters at every distance mark, inset panels between them, neon bands, distance boards.
+local function buildSideWalls(parent: Instance, c: Vector3, size: Vector3, front: number, back: number, line: number)
+	local bays = { { front, line } }
+	for i = 1, #MARKS - 1 do
+		table.insert(bays, { line - MARKS[i], line - MARKS[i + 1] })
+	end
+	table.insert(bays, { line - MARKS[#MARKS], back })
+	for _, s in { -1, 1 } do
+		local wx = c.X + s * size.X / 2 -- inner face
+		local function out(depth: number): number -- x `depth` studs out from the wall
+			return wx - s * depth
+		end
+		deco(parent, Vector3.new(0.5, 1, size.Z), CFrame.new(out(0.25), 0.5, c.Z), C.MetalLight, PLATE)
+		local low = glow(parent, Vector3.new(0.12, 0.14, size.Z), CFrame.new(out(0.5), 1, c.Z), C.Ally) -- skirting edge
+		washLight(low, if s < 0 then Enum.NormalId.Right else Enum.NormalId.Left, C.Ally, 12, 0.6)
+		glow(parent, Vector3.new(0.1, 0.14, size.Z), CFrame.new(out(0.05), 14.2, c.Z), C.Ally)
+		glow(parent, Vector3.new(0.1, 0.14, size.Z), CFrame.new(out(0.05), 22.4, c.Z), C.Purple)
+		for _, d in MARKS do
+			local z = line - d
+			deco(parent, Vector3.new(0.8, WALL_H, 1.6), CFrame.new(out(0.4), WALL_H / 2, z), C.MetalLight)
+			glow(parent, Vector3.new(0.1, 20, 0.25), CFrame.new(out(0.85), 11.5, z), C.Ally)
+			wedge(parent, Vector3.new(1.6, 1.5, 0.8), Vector3.new(out(1.2), 22.05, z), Vector3.new(-s, 0, 0), C.MetalLight, true)
+		end
+		for _, bay in bays do
+			local len = bay[1] - bay[2] - 2.6
+			local mid = (bay[1] + bay[2]) / 2
+			if len > 2 then
+				deco(parent, Vector3.new(0.2, 11, len), CFrame.new(out(0.1), 7.7, mid), C.MetalLight)
+				deco(parent, Vector3.new(0.12, 9.6, len - 1.2), CFrame.new(out(0.26), 7.7, mid), DEEP)
+				glow(parent, Vector3.new(0.08, 0.16, len - 2), CFrame.new(out(0.36), 11, mid), C.Ally)
+			end
+		end
+		-- Distance boards hang off each pilaster, angled 45 degrees toward the firing line.
+		local facing = Vector3.new(-s, 0, 1).Unit
+		for _, d in DISTANCES do
+			local center = Vector3.new(out(0.95 + 1.556), 8, line - d - 1.856)
+			sign(parent, center, facing, Vector2.new(4.4, 2.6), tostring(d), C.Light)
+			glow(parent, Vector3.new(4.8, 3, 0.1), CFrame.lookAt(center - facing * 0.25, center), C.Ally)
+		end
+	end
+end
+
+-- Ceiling: ribs above the pilasters, lane-edge beams, light panels over the lane and the side aisles.
+local function buildCeiling(parent: Instance, c: Vector3, size: Vector3, front: number, line: number)
+	local y = WALL_H
+	for _, d in MARKS do
+		deco(parent, Vector3.new(size.X, 1.2, 1.6), CFrame.new(c.X, y - 0.6, line - d), C.MetalLight)
+	end
+	for _, s in { -1, 1 } do
+		deco(parent, Vector3.new(1, 0.8, size.Z), CFrame.new(c.X + s * 15, y - 0.4, c.Z), C.MetalLight)
+		glow(parent, Vector3.new(0.25, 0.1, size.Z), CFrame.new(c.X + s * 15, y - 0.85, c.Z), C.Ally)
+		deco(parent, Vector3.new(9, 0.4, 3.8), CFrame.new(c.X + s * 23, y - 0.2, front - 6), DEEP)
+		panel(parent, CFrame.new(c.X + s * 23, y - 0.5, front - 6), Vector3.new(8, 0.15, 3), 1.2, 28, false)
+	end
+	for i, d in DISTANCES do
+		local z = line - d + 7.5 -- just in front of each bot, so its face is lit
+		deco(parent, Vector3.new(13, 0.4, 3.4), CFrame.new(c.X, y - 0.2, z), DEEP)
+		panel(parent, CFrame.new(c.X, y - 0.5, z), Vector3.new(12, 0.15, 2.6), 2, 30, i == 2 or i == 4)
+	end
+end
+
+-- Backstop: sloped berm, a big glowing target emblem, flanking panels and the room title.
+local function buildBackWall(parent: Instance, c: Vector3, size: Vector3, back: number)
+	wedge(parent, Vector3.new(size.X, 2.4, 3), Vector3.new(c.X, 1.2, back + 1.5), Vector3.new(0, 0, 1), C.Metal, false, PLATE)
+	glow(parent, Vector3.new(size.X, 0.12, 0.12), CFrame.new(c.X, 2.46, back + 0.08), C.Enemy)
+	glow(parent, Vector3.new(size.X, 0.14, 0.1), CFrame.new(c.X, 22.6, back + 0.05), C.Purple)
+
+	local emblem = Vector3.new(c.X, 12, back)
+	local rings = { -- stacked discs, each 0.1 further out: back plate, rings, bullseye
+		{ d = 13, color = C.MetalLight, material = METAL },
+		{ d = 12, color = C.Enemy, material = NEON },
+		{ d = 10.4, color = DEEP, material = METAL },
+		{ d = 7, color = C.Enemy, material = NEON },
+		{ d = 5.4, color = DEEP, material = METAL },
+	}
+	for i, r in rings do
+		cylinder(parent, 0.1, r.d, CFrame.new(emblem + Vector3.new(0, 0, 0.1 * i - 0.05)) * ALONG_Z, r.color, r.material)
+	end
+	local core = cylinder(parent, 0.1, 2.2, CFrame.new(emblem + Vector3.new(0, 0, 0.1 * #rings + 0.05)) * ALONG_Z, C.Gold, NEON)
+	Props.pointLight(core, C.Enemy, 20, 0.8)
+
+	for _, s in { -1, 1 } do
+		local px = c.X + s * 18
+		deco(parent, Vector3.new(21, 13, 0.2), CFrame.new(px, 10.3, back + 0.1), C.MetalLight)
+		deco(parent, Vector3.new(19.6, 11.6, 0.12), CFrame.new(px, 10.3, back + 0.26), DEEP)
+		glow(parent, Vector3.new(18.6, 0.14, 0.06), CFrame.new(px, 7.4, back + 0.35), C.Ally)
+		glow(parent, Vector3.new(18.6, 0.14, 0.06), CFrame.new(px, 13.2, back + 0.35), C.Ally)
+		glow(parent, Vector3.new(0.18, 14, 0.1), CFrame.new(c.X + s * 7.1, 10.5, back + 0.05), C.Enemy)
+	end
+	sign(parent, Vector3.new(c.X, 20.4, back + 0.3), Vector3.new(0, 0, 1), Vector2.new(22, 3.2), "FIRING RANGE", C.Ally)
+end
+
 -- The firing range is a separate room 200 studs past the lobby; a pad inside teleports back.
+-- Lights: 13 (booth 2 + lane 5 + aisles 2 + wall wash 2 + pad + emblem), 4 with shadows.
 function Range.build(lobby: Model, teleports)
 	local c, size = L.Range.center, L.Range.size
 	local front, back = c.Z + size.Z / 2, c.Z - size.Z / 2
-	Props.block(lobby, Vector3.new(size.X, 1, size.Z), CFrame.new(c.X, -0.5, c.Z), C.MetalLight, "RangeFloor")
-	Props.walls(lobby, Vector3.new(c.X, 0, c.Z), size.X, size.Z, WALL_H, C.MetalLight)
-	Props.block(lobby, Vector3.new(30, 0.05, size.Z), CFrame.new(c.X, 0.025, c.Z), C.Metal, "RangeLane")
 	local line = front - 12
-	Props.neon(lobby, Vector3.new(30, 0.06, 0.5), CFrame.new(c.X, 0.03, line), C.Gold)
+	assert(back < line - 75, "range too short for dummies")
 
+	buildShell(lobby, c, size)
+	buildFloor(lobby, c, size, front, back, line)
+	buildBooth(lobby, c, front, line)
+	buildFrontWall(lobby, c, size, front)
+	buildSideWalls(lobby, c, size, front, back, line)
+	buildCeiling(lobby, c, size, front, line)
+	buildBackWall(lobby, c, size, back)
+
+	-- Arrival from the lobby is (0, 3, front - 6) facing -Z: that spot stays clear, the pad is off to the side.
 	local backPad = Vector3.new(c.X + 22, 0, front - 6)
-	Props.glowPad(lobby, backPad, C.Purple)
-	Props.sign(lobby, Vector3.new(c.X + 22, 9, front - 0.4), Vector3.new(0, 0, -1), Vector2.new(12, 4), "BACK TO LOBBY", C.Purple)
+	buildReturnPad(lobby, backPad, front)
 	local lobbyArrive = Vector3.new(0, 3, -(R + 8))
 	table.insert(teleports, {
 		center = backPad + Vector3.new(0, 0.35, 0),
 		target = CFrame.lookAt(lobbyArrive, Vector3.new(0, 3, 0)),
 	})
 
+	-- Not inside Map: Map is the line-of-sight blocker set.
 	local dummies = Instance.new("Folder")
 	dummies.Name = "Dummies"
 	dummies.Parent = workspace
-	for i, d in { 15, 30, 45, 60, 75 } do
-		dummy(dummies, Vector3.new(c.X + ({ -10, 8, -4, 10, 0 })[i], 0, line - d))
+	for i, d in DISTANCES do
+		dummy(dummies, Vector3.new(c.X + OFFSETS[i], 0, line - d))
 	end
-	assert(back < line - 75, "range too short for dummies")
 end
-
 
 return Range
 ]]></string>
@@ -2560,6 +3412,8 @@ return Range
           <string name="Name">World</string>
           <string name="Source"><![CDATA[-- Builds the + shaped lobby (round hub + PLAY, SHOP, QUESTS and range-teleport arms) and the lighting,
 -- and hands out arenas. Everything is generated from code, so the place needs no manual building.
+-- The lobby is a closed building: every floor has walls and a ceiling, so the sky is never visible.
+-- Style: dark metal shell, panelled walls with neon seams, ribbed ceilings with light panels.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -2577,17 +3431,220 @@ World.teleports = {} -- { center = Vector3, target = CFrame }
 local map: Folder
 local board: TextLabel
 
+---------------------------------------------------------------- look
+
+local WALL_H = 24
+local UP = Vector3.new(0, 1, 0)
+local NEON = Enum.Material.Neon
+local METAL = Enum.Material.Metal
+local PLATE = Enum.Material.DiamondPlate
+local FLOOR = Color3.fromRGB(21, 22, 28)
+local CEILING = Color3.fromRGB(16, 17, 22)
+local WALL = Color3.fromRGB(40, 43, 51)
+local PANEL = C.MetalLight
+local DARK = Color3.fromRGB(23, 25, 31)
+local STEEL = Color3.fromRGB(70, 75, 88)
+local LINE = Color3.fromRGB(44, 47, 57)
+local LAMP = Color3.fromRGB(214, 222, 255)
+local WARM = Color3.fromRGB(255, 228, 190)
+local GLASS = Color3.fromRGB(176, 204, 236)
+
+---------------------------------------------------------------- building helpers
+
+-- Structure people touch: walls, floors, ceilings, furniture.
+local function solid(parent: Instance, size: Vector3, cf: CFrame, color: Color3, name: string, material: Enum.Material?): Part
+	return Props.block(parent, size, cf, color, name, material)
+end
+
+-- Purely visual detail: no collisions, queries or touches. Small details skip shadows.
+local function detail(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?, shadow: boolean?): Part
+	local p = Props.block(parent, size, cf, color, "Detail", material)
+	p.CastShadow = shadow == true
+	Props.decor(p)
+	return p
+end
+
+local function glow(parent: Instance, size: Vector3, cf: CFrame, color: Color3): Part
+	local p = Props.neon(parent, size, cf, color)
+	p.Name = "Glow"
+	Props.decor(p)
+	return p
+end
+
+-- Decorative vertical-axis cylinder (floor rings, ceiling coffers).
+local function round(parent: Instance, center: Vector3, diameter: number, height: number, color: Color3, material: Enum.Material?): Part
+	local p = Props.disc(parent, center, diameter, height, color, material)
+	p.Name = "Detail"
+	p.CastShadow = false
+	Props.decor(p)
+	return p
+end
+
+-- Walkable round floor layer from y = 0 up to `top`.
+local function floorDisc(parent: Instance, top: number, diameter: number, color: Color3, material: Enum.Material?): Part
+	local p = Props.disc(parent, Vector3.new(0, top / 2, 0), diameter, top, color, material)
+	p.Name = "Floor"
+	p.CastShadow = false
+	return p
+end
+
+local function ball(parent: Instance, center: Vector3, diameter: number, color: Color3): Part
+	local p = glow(parent, Vector3.new(diameter, diameter, diameter), CFrame.new(center), color)
+	p.Shape = Enum.PartType.Ball
+	return p
+end
+
+-- Bevel piece. A wedge is solid below the slope that rises from its front (look direction) to its back.
+local function wedge(parent: Instance, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?): WedgePart
+	local w = Instance.new("WedgePart")
+	w.Name = "Bevel"
+	w.Anchored = true
+	w.Size = size
+	w.CFrame = cf
+	w.Color = color
+	w.Material = material or Enum.Material.SmoothPlastic
+	w.TopSurface = Enum.SurfaceType.Smooth
+	w.BottomSurface = Enum.SurfaceType.Smooth
+	w.CastShadow = false
+	Props.decor(w)
+	w.Parent = parent
+	return w
+end
+
+-- Ceiling light: a neon panel with a real downward SurfaceLight. Only a few key lights cast shadows.
+local function lamp(parent: Instance, cf: CFrame, size: Vector3, color: Color3, brightness: number, range: number, shadows: boolean): Part
+	local p = Props.lightPanel(parent, cf, size, color, brightness, range)
+	Props.decor(p)
+	local light = p:FindFirstChildOfClass("SurfaceLight")
+	if light then
+		light.Shadows = shadows
+	end
+	return p
+end
+
+-- Signs float a little off walls; they never need to collide.
+local function quiet(label: TextLabel): TextLabel
+	local part = label:FindFirstAncestorWhichIsA("BasePart")
+	if part then
+		Props.decor(part)
+	end
+	return label
+end
+
+-- Bezel around a Props.sign placed at `pos` looking along `facing`; the bars stand 0.1 proud of its face.
+local function frameSign(parent: Instance, pos: Vector3, facing: Vector3, size: Vector2, color: Color3, lit: boolean)
+	local base = CFrame.lookAt(pos, pos + facing)
+	local t = 0.35
+	local hx, hy = (size.X + t) / 2, (size.Y + t) / 2
+	local bars = {
+		{ Vector3.new(size.X + 2 * t, t, 0.5), CFrame.new(0, hy, -0.05) },
+		{ Vector3.new(size.X + 2 * t, t, 0.5), CFrame.new(0, -hy, -0.05) },
+		{ Vector3.new(t, size.Y, 0.5), CFrame.new(hx, 0, -0.05) },
+		{ Vector3.new(t, size.Y, 0.5), CFrame.new(-hx, 0, -0.05) },
+	}
+	for _, bar in bars do
+		if lit then
+			glow(parent, bar[1], base * bar[2], color)
+		else
+			detail(parent, bar[1], base * bar[2], color, METAL)
+		end
+	end
+end
+
+-- Horizontal neon hoop from straight segments; returns one segment (to hang a light on).
+local function hoop(parent: Instance, center: Vector3, radius: number, n: number, thickness: number, color: Color3): Part
+	local first: Part? = nil
+	local len = 2 * radius * math.sin(math.pi / n) + thickness * 0.5
+	for i = 0, n - 1 do
+		local a = i / n * 2 * math.pi
+		local p = center + Vector3.new(math.sin(a), 0, math.cos(a)) * radius * math.cos(math.pi / n)
+		local seg = glow(parent, Vector3.new(len, thickness, thickness), CFrame.lookAt(p, Vector3.new(center.X, p.Y, center.Z)), color)
+		first = first or seg
+	end
+	return first :: Part
+end
+
+-- Floor arrow: two neon bars meeting at `tip`, pointing along `dir`.
+local function chevron(parent: Instance, tip: Vector3, dir: Vector3, size: number, color: Color3)
+	local side = Vector3.new(dir.Z, 0, -dir.X)
+	for _, s in { -1, 1 } do
+		local tail = tip - dir * size + side * size * s
+		glow(parent, Vector3.new(0.35, 0.04, (tip - tail).Magnitude + 0.35), CFrame.lookAt((tip + tail) / 2, tip), color)
+	end
+end
+
+-- Uncovered stretches of [0, len] between sorted, non-overlapping gaps.
+local function freeRuns(len: number, gaps: { { number } }?): { { number } }
+	local runs = {}
+	local t = 0
+	for _, g in gaps or {} do
+		if g[1] > t then
+			table.insert(runs, { t, math.min(g[1], len) })
+		end
+		t = math.max(t, g[2])
+	end
+	if len > t then
+		table.insert(runs, { t, len })
+	end
+	return runs
+end
+
+-- Dresses the inner face of a straight wall from `a` to `b` (floor-level points on the face):
+-- kick plate with a bevel and a neon line, panel bays with lit slots, and a bevelled top band with a neon line.
+-- `gaps` (distances from `a`) are left without panels for boards and station bays.
+local function dressWall(parent: Instance, a: Vector3, b: Vector3, inward: Vector3, trim: Color3, gaps: { { number } }?)
+	local span = b - a
+	local len = span.Magnitude
+	local along = span.Unit
+	local function place(t: number, depth: number, y: number, up: Vector3?): CFrame
+		local p = a + along * t + inward * depth + Vector3.new(0, y, 0)
+		return CFrame.lookAt(p, p + inward, up or UP)
+	end
+	local mid = len / 2
+	solid(parent, Vector3.new(len, 2.2, 0.5), place(mid, 0.25, 1.1), C.Metal, "Wall", METAL)
+	wedge(parent, Vector3.new(len, 0.5, 0.5), place(mid, 0.25, 2.45), C.Metal, METAL)
+	glow(parent, Vector3.new(len, 0.2, 0.2), place(mid, 0.1, 2.85), trim)
+	solid(parent, Vector3.new(len, 5.4, 0.45), place(mid, 0.225, WALL_H - 2.7), C.Metal, "Wall", METAL)
+	wedge(parent, Vector3.new(len, 0.45, 0.45), place(mid, 0.225, 18.375, -UP), C.Metal, METAL)
+	glow(parent, Vector3.new(len, 0.2, 0.2), place(mid, 0.1, 17.95), trim)
+	for _, run in freeRuns(len, gaps) do
+		local runLen = run[2] - run[1]
+		if runLen >= 3 then
+			local n = math.max(1, math.round(runLen / 10))
+			local bay = runLen / n
+			for i = 1, n do
+				local t = run[1] + (i - 0.5) * bay
+				detail(parent, Vector3.new(bay - 0.5, 14.4, 0.22), place(t, 0.11, 10.4), PANEL, METAL)
+				if n > 1 and i % 2 == 1 then
+					glow(parent, Vector3.new(math.min(3, bay * 0.4), 0.15, 0.08), place(t, 0.26, 16.4), trim)
+				end
+			end
+		end
+	end
+end
+
+-- Square column against a wall: plinth, shaft, capital, a neon collar under it and a neon strip on the `facing` side.
+local function column(parent: Instance, pos: Vector3, facing: Vector3, trim: Color3)
+	local base = CFrame.lookAt(pos, pos + facing)
+	solid(parent, Vector3.new(3.2, 1.2, 3.2), base * CFrame.new(0, 0.6, 0), C.Metal, "Column", METAL)
+	solid(parent, Vector3.new(2.2, WALL_H - 2.4, 2.2), base * CFrame.new(0, WALL_H / 2, 0), WALL, "Column", METAL)
+	detail(parent, Vector3.new(3.2, 1.2, 3.2), base * CFrame.new(0, WALL_H - 0.6, 0), C.Metal, METAL, true)
+	glow(parent, Vector3.new(2.5, 0.3, 2.5), base * CFrame.new(0, WALL_H - 1.35, 0), trim)
+	glow(parent, Vector3.new(0.4, WALL_H - 6, 0.2), base * CFrame.new(0, WALL_H / 2, -1.15), trim)
+end
+
 ---------------------------------------------------------------- lobby
 
 local L = Config.Lobby
 local R = L.HubRadius
+-- board = width kept free of wall panels on the end wall; lamps = ceiling slots (studs past R) with a real light
+-- (the other slots get the same neon panel without a light). Light budget for this file: 30 lights, 4 with shadows.
 local ARMS = {
-	{ key = "Pads", dir = Vector3.new(0, 0, 1), width = 60, length = 170, trim = C.Purple, title = "PLAY" },
-	{ key = "Shop", dir = Vector3.new(1, 0, 0), width = 40, length = 60, trim = C.Gold, title = "SHOP" },
-	{ key = "Quests", dir = Vector3.new(-1, 0, 0), width = 40, length = 60, trim = C.Good, title = "QUESTS" },
-	{ key = "Range", dir = Vector3.new(0, 0, -1), width = 30, length = 40, trim = C.Ally, title = "FIRING RANGE" },
+	{ key = "Pads", dir = Vector3.new(0, 0, 1), width = 60, length = 170, trim = C.Purple, title = "PLAY", board = 34, lamps = { 10, 60, 110, 160 } },
+	{ key = "Shop", dir = Vector3.new(1, 0, 0), width = 40, length = 60, trim = C.Gold, title = "SHOP", board = 34, lamps = { 20, 40 } },
+	{ key = "Quests", dir = Vector3.new(-1, 0, 0), width = 40, length = 60, trim = C.Good, title = "QUESTS", board = 34, lamps = { 20, 40 } },
+	{ key = "Range", dir = Vector3.new(0, 0, -1), width = 30, length = 40, trim = C.Ally, title = "FIRING RANGE", board = 26, lamps = { 10, 30 } },
 }
-local WALL_H = 24
 
 local function buildStation(lobby: Model, index: number, mode: string)
 	local half = math.ceil(#L.Stations / 2)
@@ -2599,71 +3656,229 @@ local function buildStation(lobby: Model, index: number, mode: string)
 	local inward = Vector3.new(-side, 0, 0)
 	local cfg = Config.Modes[mode]
 	local station = { mode = mode, size = cfg.teamSize, pads = {}, startsAt = nil }
+	-- Point on this station's wall (inner face at |x| = 30): local X runs along the wall.
+	local function onWall(along: number, depth: number, y: number, up: Vector3?): CFrame
+		local p = Vector3.new(side * (30 - depth), y, along)
+		return CFrame.lookAt(p, p + inward, up or UP)
+	end
 
-	Props.block(lobby, Vector3.new(14, 0.1, 32), CFrame.new(x, 0.05, zc), C.MetalLight, "StationPlate")
-	Props.sign(lobby, Vector3.new(wallX, 16, zc), inward, Vector2.new(10, 3.5), cfg.label, C.Purple)
+	-- Platform with lit edges and a gold split line between the two team pads.
+	solid(lobby, Vector3.new(16, 0.1, 32), CFrame.new(x, 0, zc), Color3.fromRGB(34, 36, 44), "StationPlate", PLATE)
+	for _, s in { -1, 1 } do
+		glow(lobby, Vector3.new(0.2, 0.04, 32), CFrame.new(x + s * 7.9, 0.06, zc), C.Purple)
+	end
+	glow(lobby, Vector3.new(11, 0.04, 0.25), CFrame.new(x, 0.06, zc), C.Gold)
+
+	-- Station bay on the wall: dark backdrop, pilasters with neon strips and a braced header framing the title.
+	detail(lobby, Vector3.new(30, 14.6, 0.2), onWall(zc, 0.1, 10.4), DARK, METAL)
+	detail(lobby, Vector3.new(33.2, 1.6, 1.2), onWall(zc, 0.6, 20.2), C.Metal, METAL, true)
+	glow(lobby, Vector3.new(26, 0.15, 0.3), onWall(zc, 1, 19.3), C.Purple)
+	for _, s in { -1, 1 } do
+		solid(lobby, Vector3.new(1.6, 19.4, 1.2), onWall(zc + s * 15.6, 0.6, 9.7), C.Metal, "Pilaster", METAL)
+		glow(lobby, Vector3.new(0.3, 16, 0.15), onWall(zc + s * 15.6, 1.275, 10.5), C.Purple)
+		local brace = Vector3.new(side * 29.4, 18.6, zc + s * 14)
+		wedge(lobby, Vector3.new(1.2, 1.6, 1.6), CFrame.lookAt(brace, brace - Vector3.new(0, 0, s), -UP), C.Metal, METAL)
+	end
+	local titlePos = Vector3.new(wallX, 16, zc) -- framed by the bay's header and pilasters
+	quiet(Props.sign(lobby, titlePos, inward, Vector2.new(10, 3.5), cfg.label, C.Purple))
+	lamp(lobby, CFrame.new(x, WALL_H - 0.1, zc), Vector3.new(9, 0.2, 7), LAMP, 1.6, 30, row == 0)
+
 	for team, dz in { -7, 7 } do
 		local color = team == 1 and C.Ally or C.Enemy
 		local center = Vector3.new(x, 0, zc + dz)
+		round(lobby, center + Vector3.new(0, 0.02, 0), 13.4, 0.14, color, NEON) -- outer halo, top 0.09
+		round(lobby, center + Vector3.new(0, 0.04, 0), 12.6, 0.18, C.Metal, METAL) -- collar, top 0.13
 		local ring = Props.glowPad(lobby, center, color)
-		local label = Props.sign(lobby, Vector3.new(wallX, 9, zc + dz), inward, Vector2.new(9, 5.5), "0/" .. cfg.teamSize, color)
+		local boardPos = Vector3.new(wallX, 9, zc + dz)
+		local label = quiet(Props.sign(lobby, boardPos, inward, Vector2.new(9, 5.5), "0/" .. cfg.teamSize, color))
+		frameSign(lobby, boardPos, inward, Vector2.new(9, 5.5), color, true)
 		table.insert(station.pads, { center = center + Vector3.new(0, 0.35, 0), board = label, ring = ring, occupants = {} })
 	end
 	table.insert(World.stations, station)
 end
 
--- One arm of the + : floor, side walls, end wall, neon trims and a title over the entrance.
--- at(along, lateral, y) converts arm-local coordinates to world space.
+-- One arm of the + : floor, walls, ceiling, entrance portal and dressing.
+-- at(along, lateral, y) converts arm-local coordinates to world space; place() gives a CFrame there whose
+-- local X runs across the arm, Y up and -Z along the arm (away from the hub).
 local function buildArm(lobby: Model, arm)
 	local dir, w = arm.dir, arm.width
+	local half = w / 2
 	local perp = Vector3.new(dir.Z, 0, -dir.X)
 	local function at(along: number, lateral: number, y: number): Vector3
 		return dir * along + perp * lateral + Vector3.new(0, y, 0)
 	end
-	local s0 = math.sqrt((R + 0.5) ^ 2 - (w / 2 + 0.5) ^ 2)
+	local function place(along: number, lateral: number, y: number): CFrame
+		local p = at(along, lateral, y)
+		return CFrame.lookAt(p, p + dir)
+	end
+	local s0 = math.sqrt((R + 0.5) ^ 2 - (half + 0.5) ^ 2)
+	local sIn = math.sqrt(R ^ 2 - half ^ 2) -- side walls start where their inner face meets the hub circle
 	local e = R + arm.length
-	local len = e - s0
-	local mid = (s0 + e) / 2
-	Props.block(lobby, Vector3.new(w, 1, len + 2), CFrame.lookAt(at(mid - 1, 0, -0.5), at(mid - 1, 0, -0.5) + dir), C.Metal, "Floor")
-	for _, sideSign in { -1, 1 } do
-		local wallPos = at(mid, sideSign * (w / 2 + 0.5), WALL_H / 2)
-		Props.block(lobby, Vector3.new(1, WALL_H, len), CFrame.lookAt(wallPos, wallPos + dir), C.MetalLight)
-		for _, y in { 1, 20 } do
-			local trimPos = at(mid, sideSign * (w / 2 - 0.1), y)
-			Props.neon(lobby, Vector3.new(0.3, 0.4, len), CFrame.lookAt(trimPos, trimPos + dir), arm.trim)
+
+	-- Shell: floor under the walls, side walls, end wall and a ceiling slab from the hub ceiling's edge (R + 1)
+	-- to the end wall's outer face, as wide as the outer faces of the side walls -> no gaps to the outside.
+	local f0, f1 = s0 - 2, e + 1
+	solid(lobby, Vector3.new(w + 2, 1, f1 - f0), place((f0 + f1) / 2, 0, -0.5), FLOOR, "Floor")
+	for _, side in { -1, 1 } do
+		solid(lobby, Vector3.new(1, WALL_H, e - sIn), place((sIn + e) / 2, side * (half + 0.5), WALL_H / 2), WALL, "Wall")
+	end
+	solid(lobby, Vector3.new(w + 2, WALL_H, 1), place(e + 0.5, 0, WALL_H / 2), WALL, "Wall")
+	local c0, c1 = R + 1, e + 1
+	solid(lobby, Vector3.new(w + 2, 1, c1 - c0), place((c0 + c1) / 2, 0, WALL_H + 0.5), CEILING, "Ceiling")
+
+	-- Wall dressing. The pads arm keeps its station bays free; end walls keep the board area free.
+	local sideGaps = nil
+	if arm.key == "Pads" then
+		sideGaps = {}
+		for row = 0, math.ceil(#L.Stations / 2) - 1 do
+			local zc = R + 30 + row * 50
+			table.insert(sideGaps, { zc - 16.6 - sIn, zc + 16.6 - sIn })
 		end
 	end
-	local endPos = at(e + 0.5, 0, WALL_H / 2)
-	Props.block(lobby, Vector3.new(w + 2, WALL_H, 1), CFrame.lookAt(endPos, endPos + dir), C.MetalLight)
-	Props.sign(lobby, at(R + 1, 0, 19), -dir, Vector2.new(math.min(w - 6, 30), 4), arm.title, arm.trim)
-	return at, e
+	for _, side in { -1, 1 } do
+		dressWall(lobby, at(sIn, side * half, 0), at(e, side * half, 0), -perp * side, arm.trim, sideGaps)
+	end
+	dressWall(lobby, at(e, -half, 0), at(e, half, 0), -dir, arm.trim, { { half - arm.board / 2, half + arm.board / 2 } })
+
+	-- Entrance portal: header beam carrying the title, lit lower edges on both sides.
+	detail(lobby, Vector3.new(w, 7.4, 1.2), place(R + 1.8, 0, WALL_H - 3.7), C.Metal, METAL, true)
+	glow(lobby, Vector3.new(w, 0.25, 0.25), place(R + 1.075, 0, 16.75), arm.trim)
+	glow(lobby, Vector3.new(w, 0.25, 0.25), place(R + 2.525, 0, 16.75), arm.trim)
+	quiet(Props.sign(lobby, at(R + 1, 0, 19), -dir, Vector2.new(math.min(w - 6, 30), 4), arm.title, arm.trim))
+
+	-- Ceiling: cross ribs every 10 studs (every other one lit), two lit service channels, light panels between ribs.
+	local k = 0
+	for along = R + 5, e - 2, 10 do
+		detail(lobby, Vector3.new(w, 1, 1.2), place(along, 0, WALL_H - 0.5), C.Metal, METAL)
+		if k % 2 == 0 then
+			glow(lobby, Vector3.new(w - 1, 0.1, 0.3), place(along, 0, WALL_H - 1.05), arm.trim)
+		end
+		detail(lobby, Vector3.new(w - 3.4, 0.03, 0.15), place(along, 0, 0.015), LINE) -- matching floor seam
+		k += 1
+	end
+	local runLen = e - c0 - 1.4
+	for _, side in { -1, 1 } do
+		detail(lobby, Vector3.new(1.2, 0.6, runLen), place(c0 + 1.4 + runLen / 2, side * (half - 4), WALL_H - 0.3), DARK, METAL)
+		glow(lobby, Vector3.new(0.2, 0.08, runLen), place(c0 + 1.4 + runLen / 2, side * (half - 4), WALL_H - 0.64), arm.trim)
+		glow(lobby, Vector3.new(0.25, 0.04, e - R - 1.5), place((R + 1 + e - 0.5) / 2, side * (half - 1.4), 0.02), arm.trim)
+		-- long floor seams complete the tile grid with the cross seams under the ribs
+		local seam = arm.key == "Pads" and 8 or half / 2
+		detail(lobby, Vector3.new(0.15, 0.03, e - R - 2), place((R + e) / 2, side * seam, 0.015), LINE)
+	end
+	local slot = Vector3.new(w == 40 and 8 or 6, 0.2, 4)
+	for along = R + 10, e - 5, 10 do
+		if table.find(arm.lamps, along - R) then
+			lamp(lobby, place(along, 0, WALL_H - 0.1), slot, LAMP, 1.4, 30, false)
+		else
+			glow(lobby, slot, place(along, 0, WALL_H - 0.1), LAMP)
+		end
+	end
+	return at, place, perp, e
 end
 
 local function buildHub(lobby: Model)
-	Props.disc(lobby, Vector3.new(0, -0.5, 0), R * 2 + 2, 1, C.Metal)
-	Props.disc(lobby, Vector3.new(0, 0.03, 0), R * 2 - 4, 0.06, C.Purple, Enum.Material.Neon)
-	Props.disc(lobby, Vector3.new(0, 0.04, 0), R * 2 - 6, 0.08, C.Metal)
+	-- Floor: base disc and stepped walkable rings, neon circles, and guide lines in each arm's color.
+	local base = Props.disc(lobby, Vector3.new(0, -0.5, 0), R * 2 + 2, 1, FLOOR)
+	base.Name = "Floor"
+	round(lobby, Vector3.new(0, 0.02, 0), R * 2 - 4, 0.04, C.Purple, NEON)
+	floorDisc(lobby, 0.08, R * 2 - 6, DARK, METAL)
+	round(lobby, Vector3.new(0, 0.07, 0), 36, 0.1, C.Purple, NEON)
+	floorDisc(lobby, 0.16, 35, Color3.fromRGB(30, 32, 40), PLATE)
+	round(lobby, Vector3.new(0, 0.17, 0), 22, 0.04, C.Ally, NEON)
+	floorDisc(lobby, 0.24, 21.2, DARK, METAL)
+	round(lobby, Vector3.new(0, 0.26, 0), 13.4, 0.04, C.Purple, NEON)
+	floorDisc(lobby, 0.32, 12.6, C.Metal, METAL)
+	for _, arm in ARMS do
+		local p = arm.dir * ((18.2 + R) / 2) + Vector3.new(0, 0.09, 0)
+		glow(lobby, Vector3.new(0.35, 0.04, R - 18.2), CFrame.lookAt(p, p + arm.dir), arm.trim)
+	end
+	for i = 0, 3 do
+		local a = (i + 0.5) * math.pi / 2
+		local d = Vector3.new(math.sin(a), 0, math.cos(a))
+		local p = d * 25.4 + Vector3.new(0, 0.09, 0)
+		detail(lobby, Vector3.new(0.3, 0.04, 14.4), CFrame.lookAt(p, p + d), STEEL)
+	end
 
-	-- Circular wall from short segments, leaving an opening for each arm.
-	local n = 48
-	local segment = 2 * math.pi * (R + 0.5) / n + 0.4
-	for i = 0, n - 1 do
-		local a = (i + 0.5) / n * 2 * math.pi
-		local p = Vector3.new(math.sin(a), 0, math.cos(a)) * (R + 0.5)
-		local open = false
-		for _, arm in ARMS do
-			local perp = Vector3.new(arm.dir.Z, 0, -arm.dir.X)
-			if p:Dot(arm.dir) > 0 and math.abs(p:Dot(perp)) < arm.width / 2 + 1 then
-				open = true
+	-- Hub wall: arcs of segments between the arm openings (an opening spans where the arm's inner wall face
+	-- meets the hub circle). Adjacent arms whose openings overlap meet in a corner of their own side walls.
+	local openings = {}
+	for _, arm in ARMS do
+		local mid = math.atan2(arm.dir.X, arm.dir.Z)
+		local halfAngle = math.asin(arm.width / 2 / R)
+		table.insert(openings, { arm = arm, from = mid - halfAngle, to = mid + halfAngle })
+	end
+	table.sort(openings, function(a, b)
+		return a.from < b.from
+	end)
+	local rm = R + 0.5
+	for i, o in openings do
+		local nextOpening = openings[i % #openings + 1]
+		local from, to = o.to, nextOpening.from + (i == #openings and 2 * math.pi or 0)
+		if to - from > 0.002 then
+			local n = math.max(1, math.ceil((to - from) * rm / 4.5))
+			local step = (to - from) / n
+			local chord = 2 * rm * math.sin(step / 2)
+			for j = 0, n - 1 do
+				local a = from + (j + 0.5) * step
+				local radial = Vector3.new(math.sin(a), 0, math.cos(a))
+				local tangent = Vector3.new(math.cos(a), 0, -math.sin(a))
+				local pos = radial * rm + Vector3.new(0, WALL_H / 2, 0)
+				solid(lobby, Vector3.new(chord + 0.4, WALL_H, 1), CFrame.lookAt(pos, Vector3.new(0, WALL_H / 2, 0)), WALL, "Wall")
+				local inner = radial * R
+				dressWall(lobby, inner - tangent * chord / 2, inner + tangent * chord / 2, -radial, C.Purple)
 			end
-		end
-		if not open then
-			local wallPos = p + Vector3.new(0, WALL_H / 2, 0)
-			Props.block(lobby, Vector3.new(segment, WALL_H, 1), CFrame.lookAt(wallPos, Vector3.new(0, WALL_H / 2, 0)), C.MetalLight)
-			local trimPos = p * ((R - 0.1) / (R + 0.5)) + Vector3.new(0, 1, 0)
-			Props.neon(lobby, Vector3.new(segment, 0.4, 0.3), CFrame.lookAt(trimPos, Vector3.new(0, 1, 0)), C.Purple)
+			for _, a in { from, (from + to) / 2, to } do
+				local radial = Vector3.new(math.sin(a), 0, math.cos(a))
+				column(lobby, radial * (R - 1.1), -radial, C.Purple)
+			end
+		else
+			-- Inner corner where the two arms' side walls cross.
+			local da, db = o.arm.dir, nextOpening.arm.dir
+			local corner = db * (o.arm.width / 2) + da * (nextOpening.arm.width / 2)
+			column(lobby, corner - (da + db) * 1.1, -(da + db).Unit, C.Purple)
 		end
 	end
+
+	-- Ceiling: one square slab over the whole hub (arm ceilings start at its edge), with a stepped round coffer,
+	-- spokes and a ring of light panels.
+	solid(lobby, Vector3.new(2 * (R + 1), 1, 2 * (R + 1)), CFrame.new(0, WALL_H + 0.5, 0), CEILING, "Ceiling")
+	round(lobby, Vector3.new(0, WALL_H - 0.3, 0), 58, 0.6, DARK, METAL)
+	round(lobby, Vector3.new(0, WALL_H - 0.45, 0), 59, 0.2, C.Purple, NEON)
+	round(lobby, Vector3.new(0, WALL_H - 1, 0), 34, 0.8, Color3.fromRGB(30, 32, 40), METAL)
+	round(lobby, Vector3.new(0, WALL_H - 1.25, 0), 35, 0.2, C.Ally, NEON)
+	round(lobby, Vector3.new(0, WALL_H - 1.75, 0), 16, 0.7, C.Metal, METAL)
+	round(lobby, Vector3.new(0, WALL_H - 1.95, 0), 16.8, 0.2, C.Purple, NEON)
+	for i = 0, 7 do
+		local a = i * math.pi / 4
+		local d = Vector3.new(math.sin(a), 0, math.cos(a))
+		local p = d * 23.2 + Vector3.new(0, WALL_H - 0.85, 0)
+		detail(lobby, Vector3.new(0.8, 0.5, 11.2), CFrame.lookAt(p, p + d), STEEL, METAL)
+		glow(lobby, Vector3.new(0.2, 0.06, 11), CFrame.lookAt(p, p + d) * CFrame.new(0, -0.28, 0), i % 2 == 0 and C.Ally or C.Purple)
+		local la = (i + 0.5) * math.pi / 4
+		local ld = Vector3.new(math.sin(la), 0, math.cos(la))
+		local lp = ld * 23 + Vector3.new(0, WALL_H - 0.7, 0)
+		if i % 2 == 0 then -- every other panel carries a real light; two opposite ones cast shadows
+			lamp(lobby, CFrame.lookAt(lp, lp + ld), Vector3.new(5, 0.2, 2.4), LAMP, 1.6, 34, i == 0 or i == 4)
+		else
+			glow(lobby, Vector3.new(5, 0.2, 2.4), CFrame.lookAt(lp, lp + ld), LAMP)
+		end
+	end
+
+	-- Centerpiece: a hanging ANTITHESIS screen box with neon hoops, lighting the spawn from below.
+	for _, s in { Vector3.new(1, 0, 1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(-1, 0, -1) } do
+		detail(lobby, Vector3.new(0.15, 3.5, 0.15), CFrame.new(s * 4 + Vector3.new(0, 20.15, 0)), STEEL, METAL)
+		glow(lobby, Vector3.new(0.6, 3.6, 0.6), CFrame.new(s * 6 + Vector3.new(0, 16, 0)), C.Ally)
+	end
+	detail(lobby, Vector3.new(12.6, 0.6, 12.6), CFrame.new(0, 18.1, 0), C.Metal, METAL, true)
+	glow(lobby, Vector3.new(13, 0.16, 13), CFrame.new(0, 17.9, 0), C.Purple)
+	detail(lobby, Vector3.new(12.6, 0.6, 12.6), CFrame.new(0, 13.9, 0), C.Metal, METAL, true)
+	glow(lobby, Vector3.new(13, 0.16, 13), CFrame.new(0, 14.1, 0), C.Purple)
+	for i, facing in { Vector3.new(0, 0, 1), Vector3.new(1, 0, 0), Vector3.new(0, 0, -1), Vector3.new(-1, 0, 0) } do
+		quiet(Props.sign(lobby, facing * 6 + Vector3.new(0, 16, 0), facing, Vector2.new(12, 3.4), "ANTITHESIS", i % 2 == 1 and C.Purple or C.Ally))
+	end
+	lamp(lobby, CFrame.new(0, 13.5, 0), Vector3.new(8, 0.2, 8), Color3.fromRGB(200, 236, 255), 1.2, 18, false)
+	hoop(lobby, Vector3.new(0, 16, 0), 10, 14, 0.3, C.Ally)
+	Props.pointLight(hoop(lobby, Vector3.new(0, 12.2, 0), 7.5, 10, 0.3, C.Purple), C.Purple, 28, 0.9)
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Anchored = true
@@ -2676,19 +3891,84 @@ local function buildHub(lobby: Model)
 	spawn.Parent = lobby
 end
 
-local function buildPadsArm(lobby: Model, at)
-	Props.block(lobby, Vector3.new(12, 0.05, 170), CFrame.new(0, 0.025, R + 85), Color3.fromRGB(12, 12, 16), "Walkway")
-	Props.neon(lobby, Vector3.new(0.4, 0.06, 170), CFrame.new(-6, 0.03, R + 85), C.Purple)
-	Props.neon(lobby, Vector3.new(0.4, 0.06, 170), CFrame.new(6, 0.03, R + 85), C.Gold)
+local function buildPadsArm(lobby: Model, at, place, e: number)
+	-- Center walkway with lit edges and arrows toward the far board.
+	solid(lobby, Vector3.new(12, 0.05, 170), CFrame.new(0, 0.025, R + 85), Color3.fromRGB(12, 12, 16), "Walkway")
+	glow(lobby, Vector3.new(0.4, 0.08, 170), CFrame.new(-6, 0.04, R + 85), C.Purple)
+	glow(lobby, Vector3.new(0.4, 0.08, 170), CFrame.new(6, 0.04, R + 85), C.Gold)
+	for along = R + 10, R + 130, 40 do
+		chevron(lobby, Vector3.new(0, 0.07, along + 1), Vector3.new(0, 0, 1), 1.8, C.Purple)
+	end
 	for i, mode in L.Stations do
 		buildStation(lobby, i, mode)
 	end
-	board = Props.sign(lobby, at(R + 170 - 0.4, 0, 12), Vector3.new(0, 0, -1), Vector2.new(24, 16), "WEEKLY WINS", C.Light)
-	Props.sign(lobby, Vector3.new(-29.6, 10, R + 6), Vector3.new(1, 0, 0), Vector2.new(14, 9),
-		"STAND ON A PAD TO QUEUE\nFirst to 5 rounds wins\nHold E near a player to challenge", C.Light)
+
+	-- WEEKLY WINS leaderboard on the end wall: backing, neon frame and lit pylons.
+	local boardPos = at(R + 170 - 0.4, 0, 12)
+	board = quiet(Props.sign(lobby, boardPos, Vector3.new(0, 0, -1), Vector2.new(24, 16), "WEEKLY WINS", C.Light))
+	detail(lobby, Vector3.new(26.4, 18.4, 0.2), place(e - 0.1, 0, 12), DARK, METAL)
+	frameSign(lobby, boardPos, Vector3.new(0, 0, -1), Vector2.new(24, 16), C.Purple, true)
+	for _, side in { -1, 1 } do
+		detail(lobby, Vector3.new(2.4, 18, 0.8), place(e - 0.4, side * 15.4, 11), C.Metal, METAL, true)
+		glow(lobby, Vector3.new(0.3, 16, 0.15), place(e - 0.875, side * 15.4, 11), C.Gold)
+	end
+
+	local helpPos = Vector3.new(-29.6, 10, R + 6)
+	local helpSize = Vector2.new(14, 9)
+	quiet(Props.sign(lobby, helpPos, Vector3.new(1, 0, 0), helpSize,
+		"STAND ON A PAD TO QUEUE\nFirst to 5 rounds wins\nHold E near a player to challenge", C.Light))
+	frameSign(lobby, helpPos, Vector3.new(1, 0, 0), helpSize, C.MetalLight, false)
+	glow(lobby, Vector3.new(0.15, 0.2, 12), CFrame.new(-29.5, 4.9, R + 6), C.Purple)
 end
 
-local function buildShopArm(lobby: Model, at)
+-- Glass display case with a palette-skinned Paragon inside, lit from its lid.
+local function displayCase(lobby: Model, base: Vector3, facing: Vector3, name: string)
+	local function up(y: number): CFrame
+		return CFrame.new(base + Vector3.new(0, y, 0))
+	end
+	round(lobby, base + Vector3.new(0, 0.02, 0), 8.4, 0.04, C.Gold, NEON)
+	round(lobby, base + Vector3.new(0, 0.035, 0), 7.8, 0.07, C.Metal, METAL)
+	solid(lobby, Vector3.new(6, 0.6, 6), up(0.3), C.Metal, "Pedestal", METAL)
+	solid(lobby, Vector3.new(5, 2.4, 5), up(1.8), WALL, "Pedestal", METAL)
+	glow(lobby, Vector3.new(5.3, 0.2, 5.3), up(3.1), C.Gold)
+	solid(lobby, Vector3.new(5.6, 0.3, 5.6), up(3.35), C.Metal, "Pedestal", METAL)
+	local glass = solid(lobby, Vector3.new(4.8, 3.8, 4.8), up(5.4), GLASS, "DisplayGlass", Enum.Material.Glass)
+	glass.Transparency = 0.6
+	glass.CastShadow = false
+	for _, corner in { Vector3.new(1, 0, 1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(-1, 0, -1) } do
+		detail(lobby, Vector3.new(0.35, 3.8, 0.35), up(5.4) + corner * 2.4, STEEL, METAL)
+	end
+	solid(lobby, Vector3.new(5.6, 0.45, 5.6), up(7.525), C.Metal, "Pedestal", METAL)
+	glow(lobby, Vector3.new(5.8, 0.12, 5.8), up(7.4), C.Gold)
+	Props.pointLight(glow(lobby, Vector3.new(3, 0.1, 3), up(7.24), WARM), WARM, 9, 1.6)
+	detail(lobby, Vector3.new(0.25, 1, 0.25), up(4), STEEL, METAL)
+	detail(lobby, Vector3.new(1.4, 0.15, 0.6), up(4.55), STEEL, METAL)
+
+	local model = WeaponModels.build("Paragon", name)
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+		end
+	end
+	-- The model's grip is its origin; shift it so the whole gun sits centered in the glass.
+	model:PivotTo(up(5.3) * CFrame.new(0.8, 0, 0) * CFrame.Angles(0, math.rad(90), math.rad(-15)))
+	model.Parent = lobby
+
+	local pal = Config.Palettes[name]
+	local price = pal.price == 0 and "FREE" or pal.price and (pal.price .. " COINS") or "ROBUX"
+	quiet(Props.sign(lobby, base + Vector3.new(0, 1.8, 0) + facing * 2.7, facing, Vector2.new(4.2, 2), string.upper(name) .. "\n" .. price, C.Gold))
+end
+
+-- Lit floor runner down the middle of an arm, from the hub edge (R) to `len` studs past it.
+local function runner(lobby: Model, place, width: number, len: number, trim: Color3)
+	solid(lobby, Vector3.new(width, 0.05, len), place(R + len / 2, 0, 0.025), Color3.fromRGB(14, 14, 18), "Walkway")
+	for _, side in { -1, 1 } do
+		glow(lobby, Vector3.new(0.3, 0.08, len), place(R + len / 2, side * width / 2, 0.04), trim)
+	end
+end
+
+local function buildShopArm(lobby: Model, at, place, e: number)
+	runner(lobby, place, 10, 56, C.Gold)
 	local stands = { { 14, -13 }, { 28, -13 }, { 42, -13 }, { 21, 13 }, { 35, 13 } }
 	for i, name in Config.PaletteOrder do
 		local spot = stands[i]
@@ -2696,39 +3976,93 @@ local function buildShopArm(lobby: Model, at)
 			break
 		end
 		local base = at(R + spot[1], spot[2], 0)
-		Props.block(lobby, Vector3.new(4, 3, 4), CFrame.new(base + Vector3.new(0, 1.5, 0)), C.MetalLight, "Pedestal")
-		Props.neon(lobby, Vector3.new(4.2, 0.2, 4.2), CFrame.new(base + Vector3.new(0, 3.05, 0)), C.Gold)
-		local model = WeaponModels.build("Paragon", name)
-		for _, part in model:GetDescendants() do
-			if part:IsA("BasePart") then
-				part.Anchored = true
-			end
-		end
-		model:PivotTo(CFrame.new(base + Vector3.new(0, 4.6, 0)) * CFrame.Angles(0, math.rad(90), math.rad(-15)))
-		model.Parent = lobby
-		local pal = Config.Palettes[name]
-		local price = pal.price == 0 and "FREE" or pal.price and (pal.price .. " COINS") or "ROBUX"
-		local facing = Vector3.new(0, 0, -math.sign(base.Z)) -- toward the walkway
-		Props.sign(lobby, base + Vector3.new(0, 1.5, 0) + facing * 2.05, facing, Vector2.new(3.8, 2.4), string.upper(name) .. "\n" .. price, C.Gold)
+		displayCase(lobby, base, Vector3.new(0, 0, -math.sign(base.Z)), name) -- face the walkway
 	end
-	Props.sign(lobby, at(R + 60 - 0.4, 0, 12), Vector3.new(-1, 0, 0), Vector2.new(28, 9), "COSMETICS SHOP\nWalk in to browse", C.Gold)
+
+	-- Counter under the shop sign.
+	solid(lobby, Vector3.new(14, 3.2, 2.4), place(e - 2.4, 0, 1.6), WALL, "Counter", METAL)
+	detail(lobby, Vector3.new(14.6, 0.3, 3), place(e - 2.4, 0, 3.35), C.Metal, METAL, true)
+	glow(lobby, Vector3.new(14, 0.25, 0.1), place(e - 3.65, 0, 2.6), C.Gold)
+
+	local signPos = at(R + 60 - 0.4, 0, 12)
+	quiet(Props.sign(lobby, signPos, Vector3.new(-1, 0, 0), Vector2.new(28, 9), "COSMETICS SHOP\nWalk in to browse", C.Gold))
+	detail(lobby, Vector3.new(30.4, 11.4, 0.2), place(e - 0.1, 0, 12), DARK, METAL)
+	frameSign(lobby, signPos, Vector3.new(-1, 0, 0), Vector2.new(28, 9), C.Gold, true)
 end
 
-local function buildQuestsArm(lobby: Model, at)
-	Props.sign(lobby, at(R + 60 - 0.4, 0, 12), Vector3.new(1, 0, 0), Vector2.new(28, 12), "DAILY QUESTS\n3 new quests every day\nWalk in to see yours", C.Good)
+local function buildQuestsArm(lobby: Model, at, place, e: number)
+	runner(lobby, place, 10, 56, C.Good)
+	local signPos = at(R + 60 - 0.4, 0, 12)
+	quiet(Props.sign(lobby, signPos, Vector3.new(1, 0, 0), Vector2.new(28, 12), "DAILY QUESTS\n3 new quests every day\nWalk in to see yours", C.Good))
+	detail(lobby, Vector3.new(30.4, 14.4, 0.2), place(e - 0.1, 0, 12), DARK, METAL)
+	frameSign(lobby, signPos, Vector3.new(1, 0, 0), Vector2.new(28, 12), C.Good, true)
+
+	-- Lit pillars: plinth, shaft, capital, two neon collars and a neon strip facing the aisle.
 	for _, lateral in { -14, 14 } do
 		for along = 12, 48, 18 do
 			local p = at(R + along, lateral, 0)
-			Props.block(lobby, Vector3.new(2, WALL_H, 2), CFrame.new(p + Vector3.new(0, WALL_H / 2, 0)), C.MetalLight, "Pillar")
-			Props.neon(lobby, Vector3.new(2.2, 0.4, 2.2), CFrame.new(p + Vector3.new(0, 6, 0)), C.Good)
+			local aisle = (at(R + along, 0, 0) - p).Unit
+			solid(lobby, Vector3.new(3, 1, 3), CFrame.new(p + Vector3.new(0, 0.5, 0)), C.Metal, "Pillar", METAL)
+			solid(lobby, Vector3.new(2, WALL_H, 2), CFrame.new(p + Vector3.new(0, WALL_H / 2, 0)), WALL, "Pillar", METAL)
+			detail(lobby, Vector3.new(3, 1, 3), CFrame.new(p + Vector3.new(0, WALL_H - 0.5, 0)), C.Metal, METAL, true)
+			local collar = glow(lobby, Vector3.new(2.3, 0.4, 2.3), CFrame.new(p + Vector3.new(0, 6, 0)), C.Good)
+			glow(lobby, Vector3.new(2.3, 0.4, 2.3), CFrame.new(p + Vector3.new(0, 18, 0)), C.Good)
+			local strip = p + aisle * 1.08 + Vector3.new(0, 12, 0)
+			glow(lobby, Vector3.new(0.4, 11, 0.15), CFrame.lookAt(strip, strip + aisle), C.Good)
+			if along == 30 then
+				Props.pointLight(collar, C.Good, 14, 1.2)
+			end
 		end
 	end
+
+	-- Quest terminal: console with a sloped screen facing the hub.
+	local toHub = at(0, 0, 0) - at(1, 0, 0)
+	local t = R + 50
+	solid(lobby, Vector3.new(7, 0.4, 3.4), place(t, 0, 0.2), C.Metal, "Terminal", METAL)
+	solid(lobby, Vector3.new(6, 2.8, 2.4), place(t, 0, 1.8), WALL, "Terminal", METAL)
+	local top = at(t, 0, 3.7)
+	wedge(lobby, Vector3.new(6, 1, 2.4), CFrame.lookAt(top, top + toHub), C.Metal, METAL)
+	local slope = math.atan2(1, 2.4)
+	local normal = UP * math.cos(slope) + toHub * math.sin(slope)
+	quiet(Props.sign(lobby, top + normal * 0.21, normal, Vector2.new(5.4, 2.2), "QUEST\nTERMINAL", C.Good))
+	glow(lobby, Vector3.new(6.2, 0.2, 2.6), place(t, 0, 3.1), C.Good)
 end
 
-local function buildRangeArm(lobby: Model, at)
+local function buildRangeArm(lobby: Model, at, place, perp: Vector3)
+	runner(lobby, place, 8, 21, C.Ally)
+	for along = R + 6, R + 18, 6 do
+		chevron(lobby, at(along + 1, 0, 0.07), at(1, 0, 0) - at(0, 0, 0), 1.6, C.Ally)
+	end
+
+	-- Teleport pad with a halo, a neon arch over it and a hovering ring.
 	local padCenter = at(R + 28, 0, 0)
-	Props.glowPad(lobby, padCenter, C.Ally)
-	Props.sign(lobby, at(R + 40 - 0.4, 0, 10), Vector3.new(0, 0, 1), Vector2.new(20, 7), "FIRING RANGE\nStep on the pad to teleport", C.Ally)
+	round(lobby, padCenter + Vector3.new(0, 0.02, 0), 13.4, 0.14, C.Ally, NEON)
+	round(lobby, padCenter + Vector3.new(0, 0.04, 0), 12.6, 0.18, C.Metal, METAL)
+	local ring = Props.glowPad(lobby, padCenter, C.Ally)
+	Props.pointLight(ring, C.Ally, 16, 2)
+	local archC = at(R + 28, 0, 6.5)
+	local r, n = 7.5, 10
+	local seg = 2 * r * math.sin(math.pi / n / 2)
+	for i = 0, n - 1 do
+		local th = (i + 0.5) / n * math.pi
+		local radial = perp * math.cos(th) + UP * math.sin(th)
+		local tangent = UP * math.cos(th) - perp * math.sin(th)
+		detail(lobby, Vector3.new(seg + 0.15, 1, 1.2), CFrame.fromMatrix(archC + radial * r, tangent, radial), C.Metal, METAL, true)
+		glow(lobby, Vector3.new(seg * 0.92 + 0.1, 0.2, 0.5), CFrame.fromMatrix(archC + radial * (r - 0.6), tangent, radial), C.Ally)
+	end
+	for _, side in { -1, 1 } do
+		detail(lobby, Vector3.new(1, 6.5, 1.2), place(R + 28, side * r, 3.25), C.Metal, METAL, true)
+		glow(lobby, Vector3.new(0.2, 6.5, 0.5), place(R + 28, side * (r - 0.6), 3.25), C.Ally)
+		detail(lobby, Vector3.new(2, 0.5, 2.4), place(R + 28, side * r, 0.25), STEEL, METAL)
+	end
+	ball(lobby, archC + UP * (r + 0.9), 1.2, C.Ally)
+	hoop(lobby, padCenter + Vector3.new(0, 9, 0), 4, 8, 0.25, C.Ally)
+
+	local signPos = at(R + 40 - 0.4, 0, 10)
+	quiet(Props.sign(lobby, signPos, Vector3.new(0, 0, 1), Vector2.new(20, 7), "FIRING RANGE\nStep on the pad to teleport", C.Ally))
+	detail(lobby, Vector3.new(22.4, 9.4, 0.2), place(R + 40 - 0.1, 0, 10), DARK, METAL)
+	frameSign(lobby, signPos, Vector3.new(0, 0, 1), Vector2.new(20, 7), C.Ally, true)
+
 	local c = L.Range.center
 	local arrive = Vector3.new(c.X, 3, c.Z + L.Range.size.Z / 2 - 6)
 	table.insert(World.teleports, {
@@ -2740,15 +4074,15 @@ end
 local function buildLobby(lobby: Model)
 	buildHub(lobby)
 	for _, arm in ARMS do
-		local at = buildArm(lobby, arm)
+		local at, place, perp, e = buildArm(lobby, arm)
 		if arm.key == "Pads" then
-			buildPadsArm(lobby, at)
+			buildPadsArm(lobby, at, place, e)
 		elseif arm.key == "Shop" then
-			buildShopArm(lobby, at)
+			buildShopArm(lobby, at, place, e)
 		elseif arm.key == "Quests" then
-			buildQuestsArm(lobby, at)
+			buildQuestsArm(lobby, at, place, e)
 		else
-			buildRangeArm(lobby, at)
+			buildRangeArm(lobby, at, place, perp)
 		end
 	end
 	Range.build(lobby, World.teleports)
